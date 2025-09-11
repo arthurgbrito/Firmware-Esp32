@@ -1,6 +1,10 @@
+#include <Wire.h>
 #include "Adafruit_VL53L0X.h"
 #include <rdm6300.h>
-#include <Wire.h>
+#include <Wifi.h>
+#include <HTTPClient.h>
+#include <WifiManager.h>
+
 
 unsigned long tempoAnterior = 0;
 int piscarAtivo = 0;
@@ -17,6 +21,9 @@ HardwareSerial RFIDserial(1);
 Rdm6300 rdm;
 
 void setup() {
+
+  WifiManager wm;
+
   Serial.begin(115200);
   RFIDserial.begin(9600, SERIAL_8N1, RDM_RX, RDM_TX);
   rdm.begin(&RFIDserial);
@@ -33,6 +40,18 @@ void setup() {
   while (! Serial) {
     delay(1);
   }
+
+  bool res = wm.autoConnect("ESP32_Config");
+
+  if (!res){
+    Serial.println("Falha ao conectar");
+    ESP.restart();
+  } else {
+    Serial.println("Conectado com sucesso!");
+    Serial.println("IP local: ");
+    Serial.println(Wifi.localIP());
+  }
+
   
   if (!lox.begin()) {
     Serial.println(F("Failed to boot VL53L0X"));
@@ -49,16 +68,16 @@ void loop() {
   if (uint32_t tag = rdm.get_new_tag_id()) {
   
     if (altera_estado == 0 && tag == 0x909B98 || altera_estado == 0 && tag == 0x80CB48) {
-    Serial.print("ACESSO LIBERADO\n");
-    digitalWrite(13, HIGH);
-    abreporta();
-    altera_estado = !altera_estado;
-  }
-  else if(altera_estado && tag == 0x909B98){
-    digitalWrite(13, LOW);
-    Serial.print("PORTA TRANCADA\n");
-    altera_estado = 0;
-  }
+      Serial.print("ACESSO LIBERADO\n");
+      digitalWrite(13, HIGH);
+      abreporta();
+      altera_estado = !altera_estado;
+    }
+    else if(altera_estado && tag == 0x909B98){
+      digitalWrite(13, LOW);
+      Serial.print("PORTA TRANCADA\n");
+      altera_estado = 0;
+    }
   }
 }
 
