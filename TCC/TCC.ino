@@ -1,9 +1,11 @@
+#include <dummy.h>
+
 #include <Wire.h>
 #include "Adafruit_VL53L0X.h"
 #include <rdm6300.h>
-#include <Wifi.h>
+#include <WiFi.h>
 #include <HTTPClient.h>
-#include <WifiManager.h>
+#include <WiFiManager.h>
 
 
 unsigned long tempoAnterior = 0;
@@ -15,6 +17,7 @@ int piscarAtivo = 0;
 #define Buzzer 32
 #define botao 35
 int altera_estado = 0;
+String requisicaoUrl = "http://192.168.0.58/Fechadura_Eletronica/APIs/solicitacoes.php";
 
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 HardwareSerial RFIDserial(1);
@@ -22,7 +25,7 @@ Rdm6300 rdm;
 
 void setup() {
 
-  WifiManager wm;
+  WiFiManager wm;
 
   Serial.begin(115200);
   RFIDserial.begin(9600, SERIAL_8N1, RDM_RX, RDM_TX);
@@ -49,7 +52,7 @@ void setup() {
   } else {
     Serial.println("Conectado com sucesso!");
     Serial.println("IP local: ");
-    Serial.println(Wifi.localIP());
+    Serial.println(WiFi.localIP());
   }
 
   
@@ -60,6 +63,30 @@ void setup() {
 }
 
 void loop() {
+
+  WiFiManager wm;
+
+  bool res = wm.autoConnect("ESP32_Config");
+
+  if (res){
+
+    HTTPClient http;
+
+    http.begin(requisicaoUrl);
+    int httpResponse = http.GET();
+
+    if (httpResponse > 0){
+      String payload = http.getString();
+      Serial.println("Resposta JSON: " + payload);
+
+      if (payload.indexOf("pendente") > 0){
+        Serial.println("Nova solicitação encontrada.");
+      }
+
+    }
+
+  }
+  
   tagrfid();
   mededistancia();
 }
