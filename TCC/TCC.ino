@@ -144,20 +144,20 @@ void newRegistration(){
 }
 
 void tagrfid() {
-if (uint32_t tag = rdm.get_new_tag_id()) {
+  if (uint32_t tag = rdm.get_new_tag_id()) {
 
-  if (altera_estado == 0 && tag == 0x909B98 || altera_estado == 0 && tag == 0x80CB48) {
-    Serial.print("ACESSO LIBERADO\n");
-    digitalWrite(13, HIGH);
-    abreporta();
-    altera_estado = !altera_estado;
+    if (altera_estado == 0 && tag == 0x909B98 || altera_estado == 0 && tag == 0x80CB48) {
+      Serial.print("ACESSO LIBERADO\n");
+      digitalWrite(13, HIGH);
+      abreporta();
+      altera_estado = !altera_estado;
+    }
+    else if(altera_estado && tag == 0x909B98){
+      digitalWrite(13, LOW);
+      Serial.print("PORTA TRANCADA\n");
+      altera_estado = 0;
+    }
   }
-  else if(altera_estado && tag == 0x909B98){
-    digitalWrite(13, LOW);
-    Serial.print("PORTA TRANCADA\n");
-    altera_estado = 0;
-  }
-}
 }
 
 void mededistancia(){
@@ -188,10 +188,11 @@ void abreporta() {
   digitalWrite(33, LOW);
 
   while(millis() - tempoInicio <= 200){
-  digitalWrite(32, HIGH);
+    digitalWrite(32, HIGH);
   }
+
   while (millis() - tempoInicio > 200 && millis() - tempoInicio < 2700) {
-  digitalWrite(32, LOW);
+    digitalWrite(32, LOW);
   }
 }
 
