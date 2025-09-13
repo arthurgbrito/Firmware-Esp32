@@ -116,7 +116,7 @@ void newRegistration(){
 
         httpPost.addHeader("Content-Type", "application/x-www-form-urlencoded"); // aponta qual vai ser o método de envio das informações por meio da URL
 
-        // Construção da URL
+        // Construção da URL de resposta
         String postData = "id_solicitacao=";
         postData += String(id_solicitante);
         postData += "&cracha=";
