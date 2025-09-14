@@ -23,8 +23,8 @@ int altera_estado = 0;
 unsigned long ultimoPeriodo = 0;
 const unsigned long intervalo = 3000;
 
-String requisicaoUrl = "http://192.168.0.58/Fechadura_Eletronica/APIs/solicitacoes.php";
-String atualizaDB = "http://192.168.0.58/Fechadura_Eletronica/APIs/atualizaDB.php";
+String requisicaoUrl = "http://192.168.100.12/Fechadura_Eletronica/APIs/solicitacoes.php";
+String atualizaDB = "http://192.168.100.12/Fechadura_Eletronica/APIs/atualizaDB.php";
 
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 HardwareSerial RFIDserial(1);
@@ -72,15 +72,17 @@ void setup() {
 }
 
 void loop() {
+  if (WiFi.status() == WL_CONNECTED){
 
-  if (millis() - ultimoPeriodo >= intervalo){ // A cada 2 segundos ele faz a requisição http para verificar se há alguém se cadastrando
-    ultimoPeriodo = millis();
-
-    if (WiFi.status() == WL_CONNECTED){
-     newRegistration(); 
+    if (millis() - ultimoPeriodo >= intervalo){ // A cada 2 segundos ele faz a requisição http para verificar se há alguém se cadastrando
+      ultimoPeriodo = millis();  
+      newRegistration(); 
     }
+
+
+
   }
-  tagrfid();
+  leiaCracha();
   mededistancia();
 }
 
@@ -109,25 +111,26 @@ void newRegistration(){
         uint32_t tagNova = rdm.get_new_tag_id();
 
         while (( tagNova = rdm.get_new_tag_id()) == 0); // Tag a ser cadastrada
-        digitalWrite(LED_PIN, HIGH);
-        Serial.println("Cartão lido");
+          digitalWrite(LED_PIN, HIGH);
+          Serial.println("Cartão lido");
 
-        httpPost.begin(atualizaDB); // Faz a requisição para outra API para atualizar o banco de dados com as informações do usuário e da TAG
+          httpPost.begin(atualizaDB); // Faz a requisição para outra API para atualizar o banco de dados com as informações do usuário e da TAG
 
-        httpPost.addHeader("Content-Type", "application/x-www-form-urlencoded"); // aponta qual vai ser o método de envio das informações por meio da URL
+          httpPost.addHeader("Content-Type", "application/x-www-form-urlencoded"); // aponta qual vai ser o método de envio das informações por meio da URL
 
-        // Construção da URL de resposta
-        String postData = "id_solicitacao=";
-        postData += String(id_solicitante);
-        postData += "&cracha=";
-        postData += tagNova;
+          // Construção da URL de resposta
+          String postData = "id_solicitacao=";
+          postData += String(id_solicitante);
+          postData += "&cracha=";
+          postData += tagNova;
 
-        int post = httpPost.POST(postData);
-        String payloadPost = httpPost.getString();
-        Serial.println(post);
-        
+          int post = httpPost.POST(postData); // Pegando a resposta da requisição POST
+          String payloadPost = httpPost.getString();
+          Serial.println(post);
+          
         if (payloadPost.indexOf("ok") < 0){
-          Serial.println("Erro ao atualizar valores.");
+          Serial.println("ERRO AO CADASTRAR CRACHÁ, TENTE NOVAMENTE REALIZAR O CADASTRO!");
+          
         } else {
           Serial.println("CRACHÁ CADASTRADO COM SUCESSO!");
         }
@@ -143,10 +146,12 @@ void newRegistration(){
   http.end();
 }
 
-void tagrfid() {
+void leiaCracha () {
   if (uint32_t tag = rdm.get_new_tag_id()) {
 
-    if (altera_estado == 0 && tag == 0x909B98 || altera_estado == 0 && tag == 0x80CB48) {
+    String url = "http://192.168.100.12/Fechadura_Eletronica/APIs/leiaCartao";
+    
+    /*if (altera_estado == 0 && tag == 0x909B98 || altera_estado == 0 && tag == 0x80CB48) {
       Serial.print("ACESSO LIBERADO\n");
       digitalWrite(13, HIGH);
       abreporta();
@@ -156,7 +161,8 @@ void tagrfid() {
       digitalWrite(13, LOW);
       Serial.print("PORTA TRANCADA\n");
       altera_estado = 0;
-    }
+    }*/
+
   }
 }
 
