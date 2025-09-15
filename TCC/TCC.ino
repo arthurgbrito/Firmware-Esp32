@@ -107,7 +107,6 @@ void newRegistration(){
         const char* id = doc["id"];
         int id_solicitante = atoi(id); // id do usuário que fez o cadastro
 
-        Serial.println("\n\n\nENTROU DENTRO DO !ERROR\n\n\n");
         uint32_t tagNova = rdm.get_new_tag_id();
 
         while (( tagNova = rdm.get_new_tag_id()) == 0); // Tag a ser cadastrada
