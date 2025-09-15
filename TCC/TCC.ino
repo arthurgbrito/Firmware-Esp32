@@ -24,9 +24,9 @@ bool modoAula = 0;
 unsigned long ultimoPeriodo = 0;
 const unsigned long intervalo = 3000;
 
-String requisicao = "http://192.168.100.12/Fechadura_Eletronica/APIs/solicitacoes.php";
-String atualizaDB = "http://192.168.100.12/Fechadura_Eletronica/APIs/atualizaDB.php";
-String leitorCracha = "http://192.168.100.12/Fechadura_Eletronica/APIs/leiaCartao.php";
+String solicitacaoCadastro = "http://192.168.1.8/Fechadura_Eletronica/APIs/solicitacoes.php";
+String atualizaDB = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaDB.php";
+String leitorCracha = "http://192.168.1.8/Fechadura_Eletronica/APIs/leiaCartao.php";
 
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 HardwareSerial RFIDserial(1);
@@ -88,7 +88,7 @@ void loop() {
 
 void newRegistration(){
 
-  http.begin(requisicao); // Faz a requisição http para a api responsável por verificar se há algum cadastro pendente
+  http.begin(solicitacaoCadastro); // Faz a requisição http GET para a api responsável por verificar se há algum cadastro pendente
   int httpResponse = http.GET();
   Serial.println(httpResponse);
 
@@ -107,6 +107,7 @@ void newRegistration(){
         const char* id = doc["id"];
         int id_solicitante = atoi(id); // id do usuário que fez o cadastro
 
+        Serial.println("\n\n\nENTROU DENTRO DO !ERROR\n\n\n");
         uint32_t tagNova = rdm.get_new_tag_id();
 
         while (( tagNova = rdm.get_new_tag_id()) == 0); // Tag a ser cadastrada
@@ -134,11 +135,9 @@ void newRegistration(){
           Serial.println("CRACHÁ CADASTRADO COM SUCESSO!");
         }
       }
-
     } else {
       Serial.println("Nenhuma solicitação encontrada.");
     }
-
   } else {
     Serial.println("Erro na requisição");
   }
@@ -161,15 +160,13 @@ void leiaCracha () {
         bool autorizado = doc["autorizado"];
         modoAula = doc["modoAula"];
 
-        Serial.println(modoAula);
-
         if (autorizado && modoAula == 0){
-          digitalWrite(13, HIGH);
-          abreporta();
-          Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
-        } else if (autorizado && modoAula){
-          digitalWrite(13, LOW);
+          digitalWrite(13, LOW); // LED branco
           Serial.println("MODO AULA DESATIVADO!");
+        } else if (autorizado && modoAula){
+          digitalWrite(13, HIGH); // LED branco
+          habilitaModoAula();
+          Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
         } else if (!autorizado){
           Serial.println("ACESSO NEGADO!");
         }
@@ -184,41 +181,39 @@ void mededistancia(){
   lox.rangingTest(&measure, false);
   int medida = measure.RangeMilliMeter/10;
 
-  /* if(medida == 819){
-    Serial.print("Porta fechada\n");
-  } */
-
   if (modoAula == 1 && medida < 10){
-  abreporta();
+    Serial.print("\n\nPorta aberta\n\n");
+    habilitaModoAula();
+   
   }
   else{
-  fechaporta();
+    desabilitaModoAula();
   }
 
   delay(100);
 }
 
-void abreporta() {
+void habilitaModoAula() {
   unsigned long tempoInicio = millis();
 
-  digitalWrite(19, HIGH);  
-  digitalWrite(18, LOW);  
-  digitalWrite(27, HIGH); 
-  digitalWrite(33, LOW);
+  digitalWrite(19, HIGH); // LED verde
+  digitalWrite(18, LOW);  // LED vermelho
+ // digitalWrite(27, HIGH); 
+  //digitalWrite(33, LOW);
 
   while(millis() - tempoInicio <= 200){
-    digitalWrite(32, HIGH);
+    digitalWrite(32, HIGH); // buzzer
   }
 
   while (millis() - tempoInicio > 200 && millis() - tempoInicio < 2700) {
-    digitalWrite(32, LOW);
+    digitalWrite(32, LOW); // buzzer
   }
 }
 
-void fechaporta(){
-  digitalWrite(19, LOW);
-  digitalWrite(18, HIGH);
+void desabilitaModoAula(){
+  digitalWrite(19, LOW);  // LED verde
+  digitalWrite(18, HIGH); // LED vermelho
   digitalWrite(27, LOW);
-  digitalWrite(32, LOW);
+  digitalWrite(32, LOW); // buzzer
 }
 
