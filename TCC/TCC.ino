@@ -13,18 +13,20 @@
 unsigned long tempoAnterior = 0;
 int piscarAtivo = 0;
 
+#define lab13 9
 #define RDM_RX 5 
 #define RDM_TX 4
 #define LED_PIN 19
 #define Buzzer 32
 #define botao 35
 
-int altera_estado = 0;
+bool modoAula = 0;
 unsigned long ultimoPeriodo = 0;
 const unsigned long intervalo = 3000;
 
-String requisicaoUrl = "http://192.168.100.12/Fechadura_Eletronica/APIs/solicitacoes.php";
+String requisicao = "http://192.168.100.12/Fechadura_Eletronica/APIs/solicitacoes.php";
 String atualizaDB = "http://192.168.100.12/Fechadura_Eletronica/APIs/atualizaDB.php";
+String leitorCracha = "http://192.168.100.12/Fechadura_Eletronica/APIs/leiaCartao.php";
 
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 HardwareSerial RFIDserial(1);
@@ -78,18 +80,15 @@ void loop() {
       ultimoPeriodo = millis();  
       newRegistration(); 
     }
-
-
-
+    leiaCracha();
   }
-  leiaCracha();
   mededistancia();
 }
 
 
 void newRegistration(){
 
-  http.begin(requisicaoUrl); // Faz a requisição http para a api responsável por verificar se há algum cadastro pendente
+  http.begin(requisicao); // Faz a requisição http para a api responsável por verificar se há algum cadastro pendente
   int httpResponse = http.GET();
   Serial.println(httpResponse);
 
@@ -149,20 +148,34 @@ void newRegistration(){
 void leiaCracha () {
   if (uint32_t tag = rdm.get_new_tag_id()) {
 
-    String url = "http://192.168.100.12/Fechadura_Eletronica/APIs/leiaCartao";
-    
-    /*if (altera_estado == 0 && tag == 0x909B98 || altera_estado == 0 && tag == 0x80CB48) {
-      Serial.print("ACESSO LIBERADO\n");
-      digitalWrite(13, HIGH);
-      abreporta();
-      altera_estado = !altera_estado;
-    }
-    else if(altera_estado && tag == 0x909B98){
-      digitalWrite(13, LOW);
-      Serial.print("PORTA TRANCADA\n");
-      altera_estado = 0;
-    }*/
+    http.begin(leitorCracha + "?cracha=" + tag + "&lab=" + String(lab13));
+    int httpResponse = http.GET();
 
+    if (httpResponse == 200){
+      String payload = http.getString();
+
+      StaticJsonDocument<512> doc;
+      DeserializationError error = deserializeJson(doc, payload);
+
+      if (!error){
+        bool autorizado = doc["autorizado"];
+        modoAula = doc["modoAula"];
+
+        Serial.println(modoAula);
+
+        if (autorizado && modoAula == 0){
+          digitalWrite(13, HIGH);
+          abreporta();
+          Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
+        } else if (autorizado && modoAula){
+          digitalWrite(13, LOW);
+          Serial.println("MODO AULA DESATIVADO!");
+        } else if (!autorizado){
+          Serial.println("ACESSO NEGADO!");
+        }
+      } 
+    }
+    http.end();
   }
 }
 
@@ -175,7 +188,7 @@ void mededistancia(){
     Serial.print("Porta fechada\n");
   } */
 
-  if (altera_estado == 1 && medida < 10){
+  if (modoAula == 1 && medida < 10){
   abreporta();
   }
   else{
