@@ -23,16 +23,18 @@ int piscarAtivo = 0;
 bool modoAula = 0;
 unsigned long ultimoPeriodo = 0;
 const unsigned long intervalo = 3000;
+int failCount = 0;
 
-String solicitacaoCadastro = "http://192.168.1.8/Fechadura_Eletronica/APIs/solicitacoes.php";
-String atualizaDB = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaDB.php";
-String leitorCracha = "http://192.168.1.8/Fechadura_Eletronica/APIs/leiaCartao.php";
+String solicitacaoCadastro = "http://172.20.8.91/Fechadura_Eletronica/APIs/solicitacoes.php";
+String atualizaDB = "http://172.20.8.91/Fechadura_Eletronica/APIs/atualizaDB.php";
+String leitorCracha = "http://172.20.8.91/Fechadura_Eletronica/APIs/leiaCartao.php";
 
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 HardwareSerial RFIDserial(1);
 Rdm6300 rdm;
 HTTPClient http;
 HTTPClient httpPost;
+
 
 void setup() {
 
@@ -74,15 +76,33 @@ void setup() {
 }
 
 void loop() {
+
+  
   if (WiFi.status() == WL_CONNECTED){
 
     if (millis() - ultimoPeriodo >= intervalo){ // A cada 2 segundos ele faz a requisição http para verificar se há alguém se cadastrando
-      ultimoPeriodo = millis();  
-      newRegistration(); 
+      ultimoPeriodo = millis();
+      newRegistration();
     }
     leiaCracha();
+    
   }
   mededistancia();
+}
+
+void portalConfig() {
+
+  WiFiManager wm;
+
+  Serial.println("Abrindo portal de configuração de internet...");
+
+  bool ok = wm.startConfigPortal("Esp32_Config", NULL);
+
+  if (ok){
+    Serial.println("Nova Rede configurada!");
+    Serial.println(WiFi.localIP());
+  } else Serial.println("Portal fechado sem nova configuração.");
+
 }
 
 
@@ -91,11 +111,12 @@ void newRegistration(){
   http.begin(solicitacaoCadastro); // Faz a requisição http GET para a api responsável por verificar se há algum cadastro pendente
   int httpResponse = http.GET();
   Serial.println(httpResponse);
-
+  
   if (httpResponse == 200){ // Se a resposta do GET for igual a 200, significa que ocorreu tudo certo com a requisição
+
+    failCount = 0;
     
     String payload = http.getString(); // Recebe o JSON que foi enviado pela API
-    //Serial.println("Resposta JSON: " + payload);
 
     if (payload.indexOf("pendente") > 0){ // Se foi encontrado uma ou mais solicitações pendentes
       Serial.println("Nova solicitação encontrada.");
@@ -139,7 +160,15 @@ void newRegistration(){
     }
   } else {
     Serial.println("Erro na requisição");
+    failCount++;
+
+    if (failCount > 15){
+      portalConfig();
+      failCount = 0;
+    }
   }
+
+  
   http.end();
 }
 
