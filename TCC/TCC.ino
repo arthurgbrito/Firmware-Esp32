@@ -25,9 +25,9 @@ unsigned long ultimoPeriodo = 0;
 const unsigned long intervalo = 3000;
 int failCount = 0;
 
-String solicitacaoCadastro = "http://172.20.8.91/Fechadura_Eletronica/APIs/solicitacoes.php";
-String atualizaDB = "http://172.20.8.91/Fechadura_Eletronica/APIs/atualizaDB.php";
-String leitorCracha = "http://172.20.8.91/Fechadura_Eletronica/APIs/leiaCartao.php";
+String solicitacaoCadastro = "http://192.168.0.58/Fechadura_Eletronica/APIs/solicitacoes.php";
+String atualizaDB = "http://192.168.0.58/Fechadura_Eletronica/APIs/atualizaDB.php";
+String leitorCracha = "http://192.168.0.58/Fechadura_Eletronica/APIs/leiaCartao.php";
 
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 HardwareSerial RFIDserial(1);
