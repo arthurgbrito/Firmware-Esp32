@@ -167,8 +167,6 @@ void newRegistration(){
       failCount = 0;
     }
   }
-
-  
   http.end();
 }
 
