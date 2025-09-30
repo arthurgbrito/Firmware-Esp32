@@ -28,6 +28,7 @@ int failCount = 0;
 String solicitacaoCadastro = "http://172.20.8.91/Fechadura_Eletronica/APIs/solicitacoes.php";
 String atualizaDB = "http://172.20.8.91/Fechadura_Eletronica/APIs/atualizaDB.php";
 String leitorCracha = "http://172.20.8.91/Fechadura_Eletronica/APIs/leiaCartao.php";
+String modoAula = "http://172.20.8.91/Fechadura_Eletronica/APIs/modoAula.php"
 
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 HardwareSerial RFIDserial(1);
@@ -220,6 +221,11 @@ void mededistancia(){
 }
 
 void habilitaModoAula() {
+
+  httpPost.begin(modoAula);
+  httpPost.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+  /*
   unsigned long tempoInicio = millis();
 
   digitalWrite(19, HIGH); // LED verde
@@ -233,7 +239,7 @@ void habilitaModoAula() {
 
   while (millis() - tempoInicio > 200 && millis() - tempoInicio < 2700) {
     digitalWrite(32, LOW); // buzzer
-  }
+  }*/
 }
 
 void desabilitaModoAula(){
