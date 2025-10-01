@@ -222,10 +222,10 @@ void mededistancia(){
 
 void habilitaModoAula() {
 
-  httpPost.begin(modoAula);
-  httpPost.addHeader("Content-Type", "application/x-www-form-urlencoded");
+  /*httpPost.begin(modoAula);
+  httpPost.addHeader("Content-Type", "application/x-www-form-urlencoded");*/
 
-  /*
+  
   unsigned long tempoInicio = millis();
 
   digitalWrite(19, HIGH); // LED verde
@@ -239,7 +239,7 @@ void habilitaModoAula() {
 
   while (millis() - tempoInicio > 200 && millis() - tempoInicio < 2700) {
     digitalWrite(32, LOW); // buzzer
-  }*/
+  }
 }
 
 void desabilitaModoAula(){
