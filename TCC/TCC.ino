@@ -24,11 +24,12 @@ bool modoAula = 0;
 unsigned long ultimoPeriodo = 0;
 const unsigned long intervalo = 3000;
 int failCount = 0;
+int proxModoAula = 0;
 
-String solicitacaoCadastro = "http://172.20.8.91/Fechadura_Eletronica/APIs/solicitacoes.php";
-String atualizaDB = "http://172.20.8.91/Fechadura_Eletronica/APIs/atualizaDB.php";
-String leitorCracha = "http://172.20.8.91/Fechadura_Eletronica/APIs/leiaCartao.php";
-String modoAula = "http://172.20.8.91/Fechadura_Eletronica/APIs/modoAula.php"
+String solicitacaoCadastro = "http://172.20.7.196/Fechadura_Eletronica/APIs/solicitacoes.php";
+String atualizaDB = "http://172.20.7.196/Fechadura_Eletronica/APIs/atualizaDB.php";
+String leitorCracha = "http://172.20.7.196/Fechadura_Eletronica/APIs/leiaCartao.php";
+String strModoAula = "http://172.20.7.196/Fechadura_Eletronica/APIs/atualizaModoAula.php";
 
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 HardwareSerial RFIDserial(1);
@@ -77,7 +78,6 @@ void setup() {
 }
 
 void loop() {
-
   
   if (WiFi.status() == WL_CONNECTED){
 
@@ -86,7 +86,7 @@ void loop() {
       newRegistration();
     }
     leiaCracha();
-    
+    atualizarModoAula();
   }
   mededistancia();
 }
@@ -167,6 +167,40 @@ void newRegistration(){
       portalConfig();
       failCount = 0;
     }
+  }
+  http.end();
+}
+
+void atualizarModoAula() {
+
+  bool modoAulaAtual = 0;
+
+  http.begin(strModoAula + "?lab=" + String(lab13));
+  int httpResponse = http.GET();
+
+  if (httpResponse == 200){
+    String payload = http.getString();
+
+    StaticJsonDocument<512> doc;
+    DeserializationError error = deserializeJson(doc, payload);
+
+    if (!error){
+      bool ok = doc["ok"];
+      modoAulaAtual = doc["modoAula"];
+
+      if (ok) {
+        if (modoAula && proxModoAula){
+          digitalWrite(13, HIGH); // LED branco
+          habilitaModoAula();
+          Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
+          proxModoAula = 0;
+        } else if (modoAula == 0 && proxModoAula == 0) {
+          digitalWrite(13, LOW); // LED branco
+          Serial.println("MODO AULA DESATIVADO!");
+          proxModoAula = 1;
+        }
+      }
+    }  
   }
   http.end();
 }
