@@ -23,14 +23,15 @@ int piscarAtivo = 0;
 bool modoAula = 0;
 bool modoAulaAtual = 0;
 unsigned long ultimoPeriodo = 0;
-const unsigned long intervalo = 3000;
+const unsigned long intervalo = 2000;
 int failCount = 0;
 int proxModoAula = 0;
 
-String solicitacaoCadastro = "http://192.168.100.12/Fechadura_Eletronica/APIs/solicitacoes.php";
-String atualizaDB = "http://192.168.100.12/Fechadura_Eletronica/APIs/atualizaDB.php";
-String leitorCracha = "http://192.168.100.12/Fechadura_Eletronica/APIs/leiaCartao.php";
-String strModoAula = "http://192.168.100.12/Fechadura_Eletronica/APIs/atualizaModoAula.php";
+String solicitacaoCadastro = "http://192.168.0.58/Fechadura_Eletronica/APIs/solicitacoes.php";
+String atualizaDB = "http://192.168.0.58/Fechadura_Eletronica/APIs/atualizaDB.php";
+String leitorCracha = "http://192.168.0.58/Fechadura_Eletronica/APIs/leiaCartao.php";
+String strModoAula = "http://192.168.0.58/Fechadura_Eletronica/APIs/atualizaModoAula.php";
+String enviaHistorico = "http://192.168.0.58/Fechadura_Eletronica/APIs/atualizaHistorico.php";
 
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 HardwareSerial RFIDserial(1);
@@ -89,7 +90,12 @@ void loop() {
     leiaCracha();
     atualizarModoAula();
   }
-  mededistancia();
+
+  if (modoAula){
+    mededistancia();
+  } else {
+    desmagnetizaPorta();
+  }
 }
 
 void portalConfig() {
@@ -194,12 +200,10 @@ void atualizarModoAula() {
           modoAulaAtual = doc["modoAula"];
 
           if (modoAulaAtual){
-            digitalWrite(13, HIGH); // LED branco
-            habilitaModoAula();
+            habilitaModoAula("aguarde");
             Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
             modoAula = modoAulaAtual;
           } else if (modoAulaAtual == 0){
-            digitalWrite(13, LOW); // LED branco
             desabilitaModoAula();
             Serial.println("MODO aula DESATIVADO!");
             modoAula = modoAulaAtual;
@@ -228,11 +232,10 @@ void leiaCracha () {
         modoAula = doc["modoAula"];
 
         if (autorizado && modoAula == 0){
-          digitalWrite(13, LOW); // LED branco
+          desabilitaModoAula();
           Serial.println("MODO AULA DESATIVADO!");
         } else if (autorizado && modoAula){
-          digitalWrite(13, HIGH); // LED branco
-          habilitaModoAula();
+          habilitaModoAula(String(tag));
           Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
         } else if (!autorizado){
           Serial.println("ACESSO NEGADO!");
@@ -248,44 +251,94 @@ void mededistancia(){
   lox.rangingTest(&measure, false);
   int medida = measure.RangeMilliMeter/10;
 
-  if (modoAula == 1 && medida < 10){
+  if (medida < 10){
     Serial.print("\n\nPorta aberta\n\n");
-    habilitaModoAula();
-   
-  }
-  else{
-    desabilitaModoAula();
+    habilitaModoAula("aguarde");
   }
 
   delay(100);
 }
 
-void habilitaModoAula() {
+void habilitaModoAula(String crachaLido) {
 
-  /*httpPost.begin(modoAula);
-  httpPost.addHeader("Content-Type", "application/x-www-form-urlencoded");*/
+  if (crachaLido != "aguarde") {
+    httpPost.begin(enviaHistorico);
+    httpPost.addHeader("Content-Type", "application/x-www-form-urlencoded");
 
-  
-  unsigned long tempoInicio = millis();
+    String postData = "cracha=" + crachaLido + "&lab=" + String(lab13) + "&acao=on";
+    int httpResponse = httpPost.POST(postData);
+    Serial.println("Registrado novo evento!");
 
-  digitalWrite(19, HIGH); // LED verde
-  digitalWrite(18, LOW);  // LED vermelho
-  digitalWrite(27, HIGH); 
-  digitalWrite(33, LOW);
+    /*
+    String payloadPost = httpPost.getString();
 
-  while(millis() - tempoInicio <= 200){
-    digitalWrite(32, HIGH); // buzzer
+    
+    StaticJsonDocument<512> doc;
+    DeserializationError error = deserializeJson(doc, payloadPost);
+
+    int ok = doc["ok"];
+    String erro = doc["erro"];
+
+    if (ok){
+      Serial.println("php inseriu no banco");
+    } else {
+      Serial.println("nao bombo");
+      Serial.println("erro: " + erro);
+    }*/
   }
 
-  while (millis() - tempoInicio > 200 && millis() - tempoInicio < 2700) {
-    digitalWrite(32, LOW); // buzzer
-  }
+
+  digitalWrite(13, HIGH); // LED branco
+  magnetizaPorta();
+  desmagnetizaPorta();
+    
 }
 
 void desabilitaModoAula(){
+  digitalWrite(13, LOW); // LED branco
+  digitalWrite(19, LOW);  // LED verde
+  digitalWrite(18, HIGH); // LED vermelho
+  digitalWrite(27, LOW);
+  bip(2);
+  digitalWrite(32, LOW); // buzzer
+}
+
+void magnetizaPorta(){
+  digitalWrite(19, HIGH); // LED verde
+  digitalWrite(18, LOW);  // LED vermelho
+  digitalWrite(27, HIGH); // Fechadura
+  //digitalWrite(33, LOW);
+
+  bip(1);
+}
+
+void desmagnetizaPorta(){
   digitalWrite(19, LOW);  // LED verde
   digitalWrite(18, HIGH); // LED vermelho
   digitalWrite(27, LOW);
   digitalWrite(32, LOW); // buzzer
+}
+
+void bip(int repeticoes) {
+  unsigned long tempoInicio = millis();
+
+  for (int cont = 0; cont < repeticoes; cont++) {
+    unsigned long t0 = millis();
+
+    // Bipe de 100 ms
+    while ((millis() - t0) < 100) {
+      digitalWrite(32, HIGH);
+    }
+
+    // Pausa de 100 ms entre bipes
+    while ((millis() - t0) < 200) {
+      digitalWrite(32, LOW);
+    }
+  }
+
+  // Espera o tempo restante até completar 2000 ms no total
+  while ((millis() - tempoInicio) < 2000) {
+    digitalWrite(32, LOW);
+  }
 }
 
