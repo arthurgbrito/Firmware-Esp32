@@ -21,15 +21,16 @@ int piscarAtivo = 0;
 #define botao 35
 
 bool modoAula = 0;
+bool modoAulaAtual = 0;
 unsigned long ultimoPeriodo = 0;
 const unsigned long intervalo = 3000;
 int failCount = 0;
 int proxModoAula = 0;
 
-String solicitacaoCadastro = "http://172.20.7.196/Fechadura_Eletronica/APIs/solicitacoes.php";
-String atualizaDB = "http://172.20.7.196/Fechadura_Eletronica/APIs/atualizaDB.php";
-String leitorCracha = "http://172.20.7.196/Fechadura_Eletronica/APIs/leiaCartao.php";
-String strModoAula = "http://172.20.7.196/Fechadura_Eletronica/APIs/atualizaModoAula.php";
+String solicitacaoCadastro = "http://192.168.100.12/Fechadura_Eletronica/APIs/solicitacoes.php";
+String atualizaDB = "http://192.168.100.12/Fechadura_Eletronica/APIs/atualizaDB.php";
+String leitorCracha = "http://192.168.100.12/Fechadura_Eletronica/APIs/leiaCartao.php";
+String strModoAula = "http://192.168.100.12/Fechadura_Eletronica/APIs/atualizaModoAula.php";
 
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 HardwareSerial RFIDserial(1);
@@ -173,9 +174,7 @@ void newRegistration(){
 
 void atualizarModoAula() {
 
-  bool modoAulaAtual = 0;
-
-  http.begin(strModoAula + "?lab=" + String(lab13));
+  http.begin(strModoAula + "?lab=" + String(  lab13) + "&modoAula=" + modoAula);
   int httpResponse = http.GET();
 
   if (httpResponse == 200){
@@ -186,19 +185,26 @@ void atualizarModoAula() {
 
     if (!error){
       bool ok = doc["ok"];
-      modoAulaAtual = doc["modoAula"];
 
-      if (ok) {
-        if (modoAula && proxModoAula){
-          digitalWrite(13, HIGH); // LED branco
-          habilitaModoAula();
-          Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
-          proxModoAula = 0;
-        } else if (modoAula == 0 && proxModoAula == 0) {
-          digitalWrite(13, LOW); // LED branco
-          Serial.println("MODO AULA DESATIVADO!");
-          proxModoAula = 1;
-        }
+      if (ok){
+
+        bool diferente = doc["diferente"];
+
+        if (diferente){
+          modoAulaAtual = doc["modoAula"];
+
+          if (modoAulaAtual){
+            digitalWrite(13, HIGH); // LED branco
+            habilitaModoAula();
+            Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
+            modoAula = modoAulaAtual;
+          } else if (modoAulaAtual == 0){
+            digitalWrite(13, LOW); // LED branco
+            desabilitaModoAula();
+            Serial.println("MODO aula DESATIVADO!");
+            modoAula = modoAulaAtual;
+          }
+        } 
       }
     }  
   }
@@ -264,8 +270,8 @@ void habilitaModoAula() {
 
   digitalWrite(19, HIGH); // LED verde
   digitalWrite(18, LOW);  // LED vermelho
- // digitalWrite(27, HIGH); 
-  //digitalWrite(33, LOW);
+  digitalWrite(27, HIGH); 
+  digitalWrite(33, LOW);
 
   while(millis() - tempoInicio <= 200){
     digitalWrite(32, HIGH); // buzzer
