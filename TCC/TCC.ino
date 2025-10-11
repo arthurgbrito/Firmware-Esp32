@@ -1,4 +1,5 @@
 
+// includes de bibliotecas utilizadas
 #include <stdlib.h>
 #include <dummy.h>
 #include <Wire.h>
@@ -8,45 +9,91 @@
 #include <HTTPClient.h>
 #include <WiFiManager.h>
 #include <ArduinoJson.h>
+#include <Arduino.h>
+//#include <LiquidCrystal_I2C.h>
 
-
+//variáveis que ajudam a contar o tempo
 unsigned long tempoAnterior = 0;
 int piscarAtivo = 0;
 
+// Laboratório correspondente ao ESP
 #define lab13 9
+
+//Pinos do ESP
 #define RDM_RX 5 
 #define RDM_TX 4
 #define LED_PIN 19
 #define Buzzer 32
 #define botao 35
 
+// Variáveis/Parâmetros utilizados para monitor carga e descarga da bateria
+#define adcBat 34
+#define RelePin 25
+#define VminCarga 1.83
+#define VmaxCarga 2.53
+int carregando = 0;
+const int Nleituras = 10;
+const int ADC_Max = 4095;
+const float ADC_Ref = 3.3;
+const float divisor = 10000/(10000 + 47000);
+unsigned long tempoInicioCarga = 0;
+unsigned long tempoEmCarga = 0;
+unsigned long ultimaCarga = 0;
+enum State {INATIVO, ATIVO, CARREGANDO, CONCLUIDO_CARGA, COMECAR_CARGA};
+State state = CONCLUIDO_CARGA;
+
+//Variáveis de monitoramento da Fonte
+
+
+// Constantes de ciclo
+const unsigned long ciclo = 5UL * 60UL * 1000UL;
+const unsigned long tempo_espera = 1000UL;
+
+// Variáveis auxiliares para a lógica utilizada
 bool modoAula = 0;
 bool modoAulaAtual = 0;
 unsigned long ultimoPeriodo = 0;
 const unsigned long intervalo = 2000;
-int failCount = 0;
 int proxModoAula = 0;
 
+// URLs para as requisições utilizadas
 String solicitacaoCadastro = "http://192.168.0.58/Fechadura_Eletronica/APIs/solicitacoes.php";
 String atualizaDB = "http://192.168.0.58/Fechadura_Eletronica/APIs/atualizaDB.php";
 String leitorCracha = "http://192.168.0.58/Fechadura_Eletronica/APIs/leiaCartao.php";
 String strModoAula = "http://192.168.0.58/Fechadura_Eletronica/APIs/atualizaModoAula.php";
 String enviaHistorico = "http://192.168.0.58/Fechadura_Eletronica/APIs/atualizaHistorico.php";
 
+// Inicialização de variáveis de bibliotecas
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 HardwareSerial RFIDserial(1);
 Rdm6300 rdm;
 HTTPClient http;
 HTTPClient httpPost;
 
+/*
+#define col  16 //Define o número de colunas do display utilizado
+#define lin   2 //Define o número de linhas do display utilizado
+#define ende  0x3F //Define o endereço do display
 
+LiquidCrystal_I2C lcd(ende,16,2); //Cria o objeto lcd passando como parâmetros o endereço, o nº de colunas e o nº de linhas
+*/
 void setup() {
 
   WiFiManager wm;
+/*
+  lcd.init(); //Inicializa a comunicação com o display já conectado
+  lcd.clear(); //Limpa a tela do display
+  lcd.backlight(); //Aciona a luz de fundo do display
+*/
 
+  // Inicialização da Serial e bibliotecas 
   Serial.begin(115200);
   RFIDserial.begin(9600, SERIAL_8N1, RDM_RX, RDM_TX);
   rdm.begin(&RFIDserial);
+
+  // Inicialização de pinos
+  pinMode(RelePin, OUTPUT);
+  digitalWrite(RelePin, LOW);
   pinMode(27, OUTPUT);
   pinMode(19, OUTPUT);
   pinMode(18, OUTPUT);
@@ -57,10 +104,15 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
 
+  // Inicialização dos pinos ADC
+  analogReadResolution(12);
+  analogSetPinAttenuation(adcBat, ADC_11db);
+
   while (! Serial) {
     delay(1);
   }
 
+  // Abre o portal de configuração do ESP
   bool res = wm.autoConnect("ESP32_Config"); // Cria a rede ESP32_Config para que seja inserida a senha da internet
 
   if (!res){ // Se não for possível conectar
@@ -79,11 +131,69 @@ void setup() {
   }
 }
 
+
 void loop() {
-  
+
+/*  lcd.setCursor(0, 0); //Coloca o cursor do display na coluna 1 e linha 1
+  lcd.print("Grupo Robotica"); //Exibe a mensagem na primeira linha do display
+  lcd.setCursor(0, 1); //Coloca o cursor do display na coluna 1 e linha 2
+  lcd.print("Hello Word");  //Exibe a mensagem na segunda linha do display
+  */
+
+  switch (state){
+    case COMECAR_CARGA:
+    { 
+      Serial.println("Iniciando carga, relé ativado!");
+      ReleOn();
+      tempoInicioCarga = millis();
+      state = CARREGANDO;
+      delay(500);
+      break;
+    }
+    
+    case CARREGANDO:
+    {
+      carregando = 1;
+      unsigned long agora = millis();
+      unsigned long tempoDeCiclo = agora - tempoInicioCarga;
+
+      if (tempoDeCiclo >= ciclo){
+        Serial.println("Desligando relé para a medição da carga.");
+        ReleOff();
+        delay(tempo_espera);
+        float VdivAtual = readVBat();
+        Serial.println("Medição realizada! Tensão atual da bateria: %.2f V", VdivAtual/divisor);
+
+        if (VdivAtual >= VmaxCarga){
+          Serial.println("Fim do ciclo de carga, bateria carregada.");
+          state = CONCLUIDO_CARGA;
+          carregando = 0;
+        } else {
+          ReleOn();
+          tempoInicioCarga = millis();
+          state = CARREGANDO;
+        }
+      }
+      
+      delay(200);
+      break;
+    }
+
+    case CONCLUIDO_CARGA:
+    {
+      float V = readVBat();
+      if (V <= VminCarga){
+        Serial.println("Tensão muito baixa: %.2f V\nComeçando Carregamento...", V);
+        state = COMECAR_CARGA;
+      } else Serial.println("Tensão ok: %.2f V", V);
+      
+      break;
+    }
+  }
+
   if (WiFi.status() == WL_CONNECTED){
 
-    if (millis() - ultimoPeriodo >= intervalo){ // A cada 2 segundos ele faz a requisição http para verificar se há alguém se cadastrando
+    if (millis() - ultimoPeriodo >= intervalo){ // A cada 2 segundos ele faz a requisição http para verificar se há alguém novo se cadastrando
       ultimoPeriodo = millis();
       newRegistration();
     }
@@ -98,31 +208,47 @@ void loop() {
   }
 }
 
-void portalConfig() {
 
-  WiFiManager wm;
+float readVBat(){
 
-  Serial.println("Abrindo portal de configuração de internet...");
+  long soma = 0;
+  for (int c = 0; c < Nleituras; c++){
+    int V = analogRead(adcBat);
+    soma += V;
+    delay(2);
+  }
+  float mediaV = soma / (float)Nleituras;
+  float Vdiv = (mediaV/ADC_Max) * ADC_Ref;
 
-  bool ok = wm.startConfigPortal("Esp32_Config", NULL);
-
-  if (ok){
-    Serial.println("Nova Rede configurada!");
-    Serial.println(WiFi.localIP());
-  } else Serial.println("Portal fechado sem nova configuração.");
-
+  return Vdiv;
 }
 
+
+void ReleOn(){
+  digitalWrite(RelePin, HIGH);
+  ultimaCarga = millis();
+}
+
+
+void ReleOff(){
+  digitalWrite(RelePin, LOW);
+
+  unsigned long agora = millis();
+  if (tempoInicioCarga != 0 && agora > tempoInicioCarga){
+    tempoEmCarga += (agora - tempoInicioCarga);
+  }
+
+  tempoInicioCarga = 0;
+  ultimaCarga = millis();
+}
 
 void newRegistration(){
 
   http.begin(solicitacaoCadastro); // Faz a requisição http GET para a api responsável por verificar se há algum cadastro pendente
   int httpResponse = http.GET();
-  Serial.println(httpResponse);
+  //Serial.println(httpResponse);
   
   if (httpResponse == 200){ // Se a resposta do GET for igual a 200, significa que ocorreu tudo certo com a requisição
-
-    failCount = 0;
     
     String payload = http.getString(); // Recebe o JSON que foi enviado pela API
 
@@ -166,20 +292,13 @@ void newRegistration(){
     } else {
       Serial.println("Nenhuma solicitação encontrada.");
     }
-  } else {
-    Serial.println("Erro na requisição");
-    failCount++;
-
-    if (failCount > 15){
-      portalConfig();
-      failCount = 0;
-    }
-  }
+  } else Serial.println("Erro na requisição");
   http.end();
 }
 
 void atualizarModoAula() {
 
+  // Faz a requisição à uma API que compara o estado de modo aula do banco e o atual do ESP
   http.begin(strModoAula + "?lab=" + String(  lab13) + "&modoAula=" + modoAula);
   int httpResponse = http.GET();
 
@@ -268,6 +387,7 @@ void habilitaModoAula(String crachaLido) {
     String postData = "cracha=" + crachaLido + "&lab=" + String(lab13) + "&acao=on";
     int httpResponse = httpPost.POST(postData);
     Serial.println("Registrado novo evento!");
+    httpPost.end();
 
     /*
     String payloadPost = httpPost.getString();
