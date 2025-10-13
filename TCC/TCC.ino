@@ -266,6 +266,7 @@ void newRegistration(){
 
         while (( tagNova = rdm.get_new_tag_id()) == 0); // Tag a ser cadastrada
           digitalWrite(LED_PIN, HIGH);
+          bip(1);
           Serial.println("Cartão lido");
 
           httpPost.begin(atualizaDB); // Faz a requisição para outra API para atualizar o banco de dados com as informações do usuário e da TAG
@@ -280,14 +281,19 @@ void newRegistration(){
 
           int post = httpPost.POST(postData); // Pegando a resposta da requisição POST
           String payloadPost = httpPost.getString();
-          Serial.println(post);
-          
-        if (payloadPost.indexOf("ok") < 0){
-          Serial.println("ERRO AO CADASTRAR CRACHÁ, TENTE NOVAMENTE REALIZAR O CADASTRO!");
-          
-        } else {
-          Serial.println("CRACHÁ CADASTRADO COM SUCESSO!");
-        }
+          //Serial.println(post);
+
+          StaticJsonDocument<512> doc;
+          DeserializationError error = deserializeJson(doc, payloadPost);
+
+          if (!error){
+            bool ok = doc["ok"];
+            if (ok){
+              Serial.println("CRACHÁ CADASTRADO COM SUCESSO!");
+            } else {
+              Serial.println("ERRO AO CADASTRAR CRACHÁ, TENTE NOVAMENTE REALIZAR O CADASTRO!");
+            }
+          }
       }
     } else {
       Serial.println("Nenhuma solicitação encontrada.");
