@@ -40,7 +40,7 @@ unsigned long tempoInicioCarga = 0;
 unsigned long tempoEmCarga = 0;
 unsigned long ultimaCarga = 0;
 enum State {INATIVO, ATIVO, CARREGANDO, CONCLUIDO_CARGA, COMECAR_CARGA};
-State state = CONCLUIDO_CARGA;
+State state = ATIVO;
 
 //Variáveis de monitoramento da Fonte
 
@@ -57,11 +57,11 @@ const unsigned long intervalo = 2000;
 int proxModoAula = 0;
 
 // URLs para as requisições utilizadas
-String solicitacaoCadastro = "http://192.168.0.58/Fechadura_Eletronica/APIs/solicitacoes.php";
-String atualizaDB = "http://192.168.0.58/Fechadura_Eletronica/APIs/atualizaDB.php";
-String leitorCracha = "http://192.168.0.58/Fechadura_Eletronica/APIs/leiaCartao.php";
-String strModoAula = "http://192.168.0.58/Fechadura_Eletronica/APIs/atualizaModoAula.php";
-String enviaHistorico = "http://192.168.0.58/Fechadura_Eletronica/APIs/atualizaHistorico.php";
+String solicitacaoCadastro = "http://192.168.100.12/Fechadura_Eletronica/APIs/solicitacoes.php";
+String atualizaDB = "http://192.168.100.12/Fechadura_Eletronica/APIs/atualizaDB.php";
+String leitorCracha = "http://192.168.100.12/Fechadura_Eletronica/APIs/leiaCartao.php";
+String strModoAula = "http://192.168.100.12/Fechadura_Eletronica/APIs/atualizaModoAula.php";
+String enviaHistorico = "http://192.168.100.12/Fechadura_Eletronica/APIs/atualizaHistorico.php";
 
 // Inicialização de variáveis de bibliotecas
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
@@ -162,10 +162,10 @@ void loop() {
         ReleOff();
         delay(tempo_espera);
         float VdivAtual = readVBat();
-        Serial.println("Medição realizada! Tensão atual da bateria: %.2f V", VdivAtual/divisor);
+        Serial.printf("Medição realizada! Tensão atual da bateria: %.2f V", VdivAtual/divisor);
 
         if (VdivAtual >= VmaxCarga){
-          Serial.println("Fim do ciclo de carga, bateria carregada.");
+          Serial.printf("Fim do ciclo de carga, bateria carregada.");
           state = CONCLUIDO_CARGA;
           carregando = 0;
         } else {
@@ -183,9 +183,9 @@ void loop() {
     {
       float V = readVBat();
       if (V <= VminCarga){
-        Serial.println("Tensão muito baixa: %.2f V\nComeçando Carregamento...", V);
+        Serial.printf("Tensão muito baixa: %.2f V\nComeçando Carregamento...", V);
         state = COMECAR_CARGA;
-      } else Serial.println("Tensão ok: %.2f V", V);
+      } else Serial.printf("Tensão ok: %.2f V", V);
       
       break;
     }
