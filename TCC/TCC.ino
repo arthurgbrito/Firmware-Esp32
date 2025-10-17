@@ -57,11 +57,11 @@ const unsigned long intervalo = 2000;
 int proxModoAula = 0;
 
 // URLs para as requisições utilizadas
-String solicitacaoCadastro = "http://192.168.1.8/Fechadura_Eletronica/APIs/solicitacoes.php";
-String atualizaDB = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaDB.php";
-String leitorCracha = "http://192.168.1.8/Fechadura_Eletronica/APIs/leiaCartao.php";
-String strModoAula = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaModoAula.php";
-String enviaHistorico = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaHistorico.php";
+String solicitacaoCadastro = "http://172.20.2.142/Fechadura_Eletronica/APIs/solicitacoes.php";
+String atualizaDB = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaDB.php";
+String leitorCracha = "http://172.20.2.142/Fechadura_Eletronica/APIs/leiaCartao.php";
+String strModoAula = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaModoAula.php";
+String enviaHistorico = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaHistorico.php";
 
 // Inicialização de variáveis de bibliotecas
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
