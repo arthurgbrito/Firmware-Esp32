@@ -26,7 +26,12 @@ int piscarAtivo = 0;
 #define RDM_TX 4
 #define LED_PIN 19
 #define Buzzer 32
-#define botao 35
+//#define botao 35
+#define reedPin 14
+
+unsigned long ultimaMudanca = 0;
+volatile int estadoPortaAtual = LOW;
+volatile bool flagEstadoPorta = false;
 
 // Variáveis/Parâmetros utilizados para monitor carga e descarga da bateria
 #define adcBat 34
@@ -55,12 +60,13 @@ const unsigned long intervalo = 2000;
 int proxModoAula = 0;
 
 // URLs para as requisições utilizadas
-String solicitacaoCadastro = "http://192.168.1.8/Fechadura_Eletronica/APIs/solicitacoes.php";
-String atualizaDB = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaDB.php";
-String leitorCracha = "http://192.168.1.8/Fechadura_Eletronica/APIs/leiaCartao.php";
-String strModoAula = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaModoAula.php";
-String enviaHistorico = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaHistorico.php";
-String consultaListaUsuarios = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaBackup.php";
+String solicitacaoCadastro = "http://10.101.221.196/Fechadura_Eletronica/APIs/solicitacoes.php";
+String atualizaDB = "http://10.101.221.196/Fechadura_Eletronica/APIs/atualizaDB.php";
+String leitorCracha = "http://10.101.221.196/Fechadura_Eletronica/APIs/leiaCartao.php";
+String strModoAula = "http://10.101.221.196/Fechadura_Eletronica/APIs/atualizaModoAula.php";
+String enviaHistorico = "http://10.101.221.196/Fechadura_Eletronica/APIs/atualizaHistorico.php";
+String consultaListaUsuarios = "http://10.101.221.196/Fechadura_Eletronica/APIs/atualizaBackup.php";
+String atualizaEstadoPorta = "http://10.101.221.196/Fechadura_Eletronica/APIs/atualizaEstadoPorta.php";
 
 const char* localBackup = "/usuarios.json"; // Caminho do arquivo na memória
 
@@ -79,6 +85,16 @@ SemaphoreHandle_t mutexModoAula;
 
 LiquidCrystal_I2C lcd(ende,16,2); //Cria o objeto lcd passando como parâmetros o endereço, o nº de colunas e o nº de linhas
 */
+
+void IRAM_ATTR toggleEstadoPorta(){
+  unsigned long agora = millis();
+  if ((agora - ultimaMudanca) > 100){
+    estadoPortaAtual = digitalRead(reedPin);
+    flagEstadoPorta = true;
+    ultimaMudanca = agora;
+  }
+}
+
 void setup() {
 
   Serial.begin(115200);
@@ -116,11 +132,14 @@ void setup() {
   pinMode(19, OUTPUT);
   pinMode(18, OUTPUT);
   pinMode(13, OUTPUT);
-  pinMode(33, OUTPUT);
+  //pinMode(33, OUTPUT);
   pinMode(32, OUTPUT);
   //pinMode(botao, INPUT_PULLDOWN);
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
+  pinMode(reedPin, INPUT_PULLUP);
+
+  pinMode(33, OUTPUT);
 
   // Inicialização dos pinos ADC
   analogReadResolution(12);
@@ -146,6 +165,7 @@ void setup() {
   xTaskCreatePinnedToCore(TaskControleCarga, "TaskControleCarga", 4096, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(TaskModoAula, "TaskModoAula", 4096, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(TaskAtualizaDBLocal, "TaskAtualizaDBLocal", 8192, NULL, 1, NULL, 0);
+  attachInterrupt(digitalPinToInterrupt(reedPin), toggleEstadoPorta, CHANGE);
   
   /*if (!lox.begin()) {
     Serial.println(F("Failed to boot VL53L0X"));
@@ -154,7 +174,7 @@ void setup() {
 }
 
 void loop() {
-  vTaskDelay(1000 / portTICK_PERIOD_MS); // opcional, evita uso de CPU desnecessário
+  verificaEstadoPorta();
 }
 
 
@@ -168,8 +188,9 @@ void TaskHTTP(void *pv){
     if (WiFi.status() == WL_CONNECTED){
       newRegistration();
       atualizarModoAula();
-      leiaCracha();
     }
+
+    leiaCracha();
     vTaskDelay(300/portTICK_PERIOD_MS);
   }
 }
@@ -200,7 +221,7 @@ void TaskControleCarga(void *pv){
           unsigned long agora = millis();
           unsigned long tempoDeCiclo = agora - tempoInicioCarga;
 
-          Serial.printf("Carregando...\n");
+          //Serial.printf("Carregando...\n");
 
           if (tempoDeCiclo >= ciclo){
             Serial.println("Desligando relé para a medição da carga.");
@@ -536,6 +557,45 @@ void newRegistration(){
   httpNovoRegistro.end();
 }
 
+
+void verificaEstadoPorta(){
+  
+  HTTPClient httpEstadoPorta;
+  
+  if (WiFi.status() == WL_CONNECTED){
+    if (flagEstadoPorta){
+    
+      httpEstadoPorta.begin(atualizaEstadoPorta);
+      httpEstadoPorta.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+      String corpoRequisicao = "lab=";
+      corpoRequisicao += String(lab13);
+      corpoRequisicao += "&estadoPorta=";
+      corpoRequisicao += estadoPortaAtual;
+
+      int httpResponse = httpEstadoPorta.POST(corpoRequisicao);
+      /*if (httpResponse == 200){
+
+        Serial.println("\n\nRequisição deu certo.\n");
+        String payloadPost = httpEstadoPorta.getString();
+
+        StaticJsonDocument<512> doc;
+        DeserializationError error = deserializeJson(doc, payloadPost);
+
+        bool ok = doc["ok"];
+        if (ok){
+          Serial.println("Requisição deu certo.");
+        } else Serial.println("Requisição deu errado.");
+      } else Serial.println("Erro na requisição do estado porta");*/
+      
+
+      httpEstadoPorta.end();
+
+      flagEstadoPorta = 0;
+    }
+  }
+}
+
 void atualizarModoAula() {
   
   HTTPClient httpModoAula;
@@ -543,7 +603,7 @@ void atualizarModoAula() {
   if (mutexModoAula && xSemaphoreTake(mutexModoAula, portMAX_DELAY)){
 
     // Faz a requisição à uma API que compara o estado de modo aula do banco e o atual do ESP
-    httpModoAula.begin(strModoAula + "?lab=" + String(  lab13) + "&modoAula=" + modoAula);
+    httpModoAula.begin(strModoAula + "?lab=" + String(lab13) + "&modoAula=" + modoAula);
     xSemaphoreGive(mutexModoAula);
     int httpResponse = httpModoAula.GET();
 
