@@ -32,7 +32,7 @@ int piscarAtivo = 0;
 #define adcBat 34
 #define RelePin 26
 #define VminCarga 2.26
-#define VmaxCarga 2.67
+#define VmaxCarga 2.50
 const int Nleituras = 50;
 const int ADC_Max = 4095;
 const float ADC_Ref = 3.3;
@@ -44,8 +44,8 @@ enum State {INATIVO, ATIVO, CARREGANDO, CONCLUIDO_CARGA, COMECAR_CARGA};
 State state = CONCLUIDO_CARGA;
 
 // Constantes de ciclo
-const unsigned long ciclo = 1 * 60 * 1000;
-const unsigned long tempo_espera = 3000;
+const unsigned long ciclo = 5 * 60 * 1000;
+const unsigned long tempo_espera = 20000;
 
 // Variáveis auxiliares para a lógica utilizada
 bool modoAula = 0;
@@ -55,22 +55,19 @@ const unsigned long intervalo = 2000;
 int proxModoAula = 0;
 
 // URLs para as requisições utilizadas
-String solicitacaoCadastro = "http://10.205.149.196/Fechadura_Eletronica/APIs/solicitacoes.php";
-String atualizaDB = "http://10.205.149.196/Fechadura_Eletronica/APIs/atualizaDB.php";
-String leitorCracha = "http://10.205.149.196/Fechadura_Eletronica/APIs/leiaCartao.php";
-String strModoAula = "http://10.205.149.196/Fechadura_Eletronica/APIs/atualizaModoAula.php";
-String enviaHistorico = "http://10.205.149.196/Fechadura_Eletronica/APIs/atualizaHistorico.php";
-String consultaListaUsuarios = "http://10.205.149.196/Fechadura_Eletronica/APIs/atualizaBackup.php";
+String solicitacaoCadastro = "http://192.168.1.8/Fechadura_Eletronica/APIs/solicitacoes.php";
+String atualizaDB = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaDB.php";
+String leitorCracha = "http://192.168.1.8/Fechadura_Eletronica/APIs/leiaCartao.php";
+String strModoAula = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaModoAula.php";
+String enviaHistorico = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaHistorico.php";
+String consultaListaUsuarios = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaBackup.php";
 
 const char* localBackup = "/usuarios.json"; // Caminho do arquivo na memória
-int falhasConexao = 0;
 
 // Inicialização de variáveis de bibliotecas
 //Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 //HardwareSerial RFIDserial(1);
 Rdm6300 rdm;
-HTTPClient http;
-HTTPClient httpPost;
 
 SemaphoreHandle_t mutexState;
 SemaphoreHandle_t mutexModoAula;
@@ -84,6 +81,22 @@ LiquidCrystal_I2C lcd(ende,16,2); //Cria o objeto lcd passando como parâmetros 
 */
 void setup() {
 
+  Serial.begin(115200);
+
+  if (!LittleFS.begin(true)) { 
+    Serial.println("ERRO: Falha ao inicializar o LittleFS!");
+    while(1); // Trava se não conseguir
+  }
+
+  mutexState = xSemaphoreCreateMutex();
+  mutexModoAula = xSemaphoreCreateMutex();
+  // Verificação opcional, mas recomendada
+  if (mutexState == NULL || mutexModoAula == NULL) {
+      Serial.println("ERRO: Falha ao criar os mutex!");
+      // Fica travado aqui ou reinicia, pois o sistema não pode continuar
+      while(1); 
+  }
+
   WiFiManager wm;
 /*
   lcd.init(); //Inicializa a comunicação com o display já conectado
@@ -91,21 +104,10 @@ void setup() {
   lcd.backlight(); //Aciona a luz de fundo do display
 */
 
-  // Inicialização da Serial e bibliotecas 
-  Serial.begin(115200);
+  // Inicialização das bibliotecas 
+
   //RFIDserial.begin(9600, SERIAL_8N1, RDM_RX, RDM_TX);
   //rdm.begin(&RFIDserial);
-
-  if (!LittleFS.begin(true)){
-    Serial.println("Ocorreu um erro ao montar o LittleFS. O dispositivo será reiniciado.");
-    ESP.restart();
-  } 
-  Serial.println("Sistema de arquivos inicializado.");
-
-  mutexState = xSemaphoreCreateMutex();
-  mutexModoAula = xSemaphoreCreateMutex();
-  Serial.println("Mutex criados!");
-      
 
   // Inicialização de pinos
   pinMode(RelePin, OUTPUT);
@@ -130,40 +132,25 @@ void setup() {
 
   // Abre o portal de configuração do ESP
   bool res = wm.autoConnect("ESP32_Config"); // Cria a rede ESP32_Config para que seja inserida a senha da internet
-  Serial.println("autoConnect retornou.");
-
-  //WiFi.begin("Alunos", "liberato");
-  //while (WiFi.status() != WL_CONNECTED) {
-  //  Serial.print(".");
-  //  delay(500);
-  //}
-  //Serial.println("Conectado!");
 
   if (!res){ // Se não for possível conectar
-    Serial.println("Falha ao conectar. Por segurança, ");
+    Serial.println("Falha ao conectar");
     ESP.restart();
-  } else { // Após conectar a primeira vez, ele salva a senha
+  } else { // Após conectar a primeira vez, ele salva a senha para sempre
     Serial.println("Conectado com sucesso!");
     Serial.println("IP local: ");
     Serial.println(WiFi.localIP());
-
-    atualizaBackupUsuarios();
   }
 
+  xTaskCreatePinnedToCore(TaskHTTP, "TaskHTTP", 4096, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(TaskControleCarga, "TaskControleCarga", 4096, NULL, 1, NULL, 1);
+  xTaskCreatePinnedToCore(TaskModoAula, "TaskModoAula", 4096, NULL, 1, NULL, 1);
+  xTaskCreatePinnedToCore(TaskAtualizaDBLocal, "TaskAtualizaDBLocal", 8192, NULL, 1, NULL, 0);
   
   /*if (!lox.begin()) {
     Serial.println(F("Failed to boot VL53L0X"));
     while(1);
   }*/
-
-
-  xTaskCreatePinnedToCore(TaskHTTP, "TaskHTTP", 4096, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(TaskControleCarga, "TaskControleCarga", 4096, NULL, 1, NULL, 1);
-  xTaskCreatePinnedToCore(TaskModoAula, "TaskModoAula", 4096, NULL, 1, NULL, 1);
-  xTaskCreatePinnedToCore(TaskAtualizaDBLocal, "TaskAtualizaDBLocal", 4096, NULL, 1, NULL, 1);
-
-  Serial.println("Tasks criadas");
-
 }
 
 void loop() {
@@ -181,25 +168,9 @@ void TaskHTTP(void *pv){
     if (WiFi.status() == WL_CONNECTED){
       newRegistration();
       atualizarModoAula();
+      leiaCracha();
     }
-    
-    leiaCracha();
-
-    vTaskDelay(500/portTICK_PERIOD_MS);
-  }
-}
-
-
-        ////////////////////////////////////////////
-        ///  TASK QUE ATUALIZA O BACKUP DO ESP   ///
-        ////////////////////////////////////////////
-
-
-void TaskAtualizaDBLocal(void *pv){
-  while (1){
-    atualizaBackupUsuarios();
-
-    vTaskDelay(1 * 60 * 1000 / portTICK_PERIOD_MS);
+    vTaskDelay(300/portTICK_PERIOD_MS);
   }
 }
 
@@ -211,7 +182,7 @@ void TaskAtualizaDBLocal(void *pv){
 
 void TaskControleCarga(void *pv){
   while(1){
-    if (xSemaphoreTake(mutexState, portMAX_DELAY)){
+    if (mutexState && xSemaphoreTake(mutexState, portMAX_DELAY)){
       switch (state){
         case COMECAR_CARGA:
         { 
@@ -281,7 +252,7 @@ void TaskControleCarga(void *pv){
 void TaskModoAula(void *pv){
   while (1){
   
-  if(xSemaphoreTake(mutexModoAula, portMAX_DELAY)){
+  if(mutexModoAula && xSemaphoreTake(mutexModoAula, portMAX_DELAY)){
     if(modoAula) mededistancia();
     else desmagnetizaPorta();
     xSemaphoreGive(mutexModoAula);
@@ -291,84 +262,110 @@ void TaskModoAula(void *pv){
 }
 
 
-        /////////////////////////////////////
-        ///  Funções que acessam a memória  ///
-        /////////////////////////////////////
+        ////////////////////////////////////////////
+        ///  TASK QUE ATUALIZA O BACKUP DO ESP   ///
+        ////////////////////////////////////////////
 
-String readJson(){
-if(!LittleFS.exists(localBackup)){
-  Serial.println("Arquivo não encontrado na memória");
-  return "";
-}
 
-File file = LittleFS.open(localBackup, FILE_READ);
-if (!file){
-  Serial.println("Erro ao abrir arquivo para leitura.");
-  return "";
-}
+void TaskAtualizaDBLocal(void *pv){
+  while (1){  
+    atualizaBackupUsuarios();
 
-String conteudo = file.readString();
-file.close();
-
-return conteudo;
-}
-
-void AddJson(const String& jsonString){
-File file = LittleFS.open(localBackup, FILE_WRITE);
-if (!file) {
-  Serial.println("Erro ao abrir arquivo para escrita.");
-  return;
-}
-
-if (file.print(jsonString)) Serial.println("Banco de dados local atualizado com sucesso.");
-else Serial.println("Falha ao escrever no arquivo.");
-
-file.close();
-}
-
-void atualizaBackupUsuarios(){
-Serial.println("Verificando atualizações no banco de dados de usuários...");
-
-http.begin(consultaListaUsuarios);
-int httpResponse = http.GET();
-
-if (httpResponse == 200){
-  String payloadBanco = http.getString();
-  String payloadLocal = readJson();
-
-  if (payloadBanco != payloadLocal){
-    Serial.println("Diferença entre as listas de usuarios. Atualizando...");
-    AddJson(payloadBanco);
-  } else Serial.println("O banco de dados local já está atualizado.");
-} else Serial.printf("Falha ao buscar lista de usuários.\n");
-
-http.end();
-}
-
-bool leiaCrachaBackup(String tag){
-Serial.println("Lendo crachás da memória...");
-
-String jsonContent = readJson();
-
-StaticJsonDocument<2048> doc;
-DeserializationError error = deserializeJson(doc, jsonContent);
-
-if (error){
-  Serial.print("Falha ao analisar JSON local: ");
-  return false;
-}
-
-JsonArray usuarios = doc.as<JsonArray>();
-for (JsonObject usuario : usuarios){
-  String cracha = usuario["cracha"];
-  if (cracha == tag) {
-    Serial.printf("Acesso liberado (offline).\n");
-    return true;
+    vTaskDelay(30 * 1000 / portTICK_PERIOD_MS);
   }
 }
 
-Serial.printf("Acesso negado (offline).\n");
-return false;
+
+        ///////////////////////////////////////
+        ///  Funções que acessam a memória  ///
+        ///////////////////////////////////////
+
+void atualizaBackupUsuarios(){
+
+  HTTPClient httpBackup;
+
+  Serial.println("Verificando atualizações no banco de dados de usuários...");
+
+  httpBackup.begin(consultaListaUsuarios);
+  int httpResponse = httpBackup.GET();
+
+  if (httpResponse == 200){
+    String payloadBanco = httpBackup.getString();
+     String payloadLocal = readJson();
+
+    if (payloadBanco != payloadLocal){
+      Serial.println("Payload banco: ");
+      Serial.println(payloadBanco);
+      Serial.println("Payload Local: ");
+      Serial.println(payloadLocal);
+      Serial.println("Diferença entre as listas de usuarios. Atualizando...");
+      AddJson(payloadBanco);
+    } else {
+      Serial.println("O banco de dados local já está atualizado.");
+      Serial.println("Payload banco: ");
+      Serial.println(payloadBanco);
+      Serial.println("Payload Local: ");
+      Serial.println(payloadLocal);
+    }
+  } else Serial.printf("Falha ao buscar lista de usuários. Código de erro: %d\n", httpResponse);
+  httpBackup.end();
+}
+
+String readJson(){
+  if(!LittleFS.exists(localBackup)){
+    Serial.println("Arquivo não encontrado na memória");
+    return "";
+  }
+
+  File file = LittleFS.open(localBackup, FILE_READ);
+  if (!file){
+    Serial.println("Erro ao abrir arquivo para leitura.");
+    return "";
+  }
+
+  String conteudo = file.readString();
+  file.close();
+
+  return conteudo;
+}
+
+void AddJson(const String& jsonString){
+  File file = LittleFS.open(localBackup, FILE_WRITE);
+  if (!file) {
+    Serial.println("Erro ao abrir arquivo para escrita.");
+    return;
+  }
+
+  if (file.print(jsonString)) Serial.println("Banco de dados local atualizado com sucesso.");
+  else Serial.println("Falha ao escrever no arquivo.");
+
+  file.close();
+}
+
+bool leiaCrachaBackup(String tag){
+  Serial.println("Lendo crachás da memória...");
+
+  String jsonContent = readJson();
+
+  StaticJsonDocument<2048> doc;
+  DeserializationError error = deserializeJson(doc, jsonContent);
+
+  if (error){
+    Serial.print("Falha ao analisar JSON local: ");
+    return false;
+  }
+
+  JsonArray usuarios = doc.as<JsonArray>();
+  for (JsonObject usuario : usuarios){
+    String cracha = usuario["cracha"];
+    if (cracha == tag) {
+      Serial.printf("Acesso liberado (offline).\n");
+      return true;
+    }
+  }
+
+  Serial.printf("Acesso negado (offline).\n");
+  return false;
 
 }
 
@@ -384,7 +381,7 @@ float readVBat(){
   for (int c = 0; c < Nleituras; c++){
     int V = analogRead(adcBat);
     soma += V;
-  vTaskDelay(2 / portTICK_PERIOD_MS);
+    vTaskDelay(2 / portTICK_PERIOD_MS);
   }
   float mediaV = (soma / (float)Nleituras);
   float Vdiv = ((mediaV/ADC_Max) * ADC_Ref);
@@ -470,19 +467,24 @@ void bip(int repeticoes) {
   }
 }
 
+
         //////////////////////
         ///  Funções HTTP  ///
         //////////////////////
 
+
 void newRegistration(){
 
-  http.begin(solicitacaoCadastro); // Faz a requisição http GET para a api responsável por verificar se há algum cadastro pendente
-  int httpResponse = http.GET();
+  HTTPClient httpNovoRegistro;
+  HTTPClient httpPostNovoRegistro;
+
+  httpNovoRegistro.begin(solicitacaoCadastro); // Faz a requisição http GET para a api responsável por verificar se há algum cadastro pendente
+  int httpResponse = httpNovoRegistro.GET();
   //Serial.println(httpResponse);
   
   if (httpResponse == 200){ // Se a resposta do GET for igual a 200, significa que ocorreu tudo certo com a requisição
     
-    String payload = http.getString(); // Recebe o JSON que foi enviado pela API
+    String payload = httpNovoRegistro.getString(); // Recebe o JSON que foi enviado pela API
 
     if (payload.indexOf("pendente") > 0){ // Se foi encontrado uma ou mais solicitações pendentes
       Serial.println("Nova solicitação encontrada.");
@@ -501,9 +503,9 @@ void newRegistration(){
           bip(1);
           Serial.println("Cartão lido");
 
-          httpPost.begin(atualizaDB); // Faz a requisição para outra API para atualizar o banco de dados com as informações do usuário e da TAG
+          httpPostNovoRegistro.begin(atualizaDB); // Faz a requisição para outra API para atualizar o banco de dados com as informações do usuário e da TAG
 
-          httpPost.addHeader("Content-Type", "application/x-www-form-urlencoded"); // aponta qual vai ser o método de envio das informações por meio da URL
+          httpPostNovoRegistro.addHeader("Content-Type", "application/x-www-form-urlencoded"); // aponta qual vai ser o método de envio das informações por meio da URL
 
           // Construção da URL de resposta
           String postData = "id_solicitacao=";
@@ -511,8 +513,8 @@ void newRegistration(){
           postData += "&cracha=";
           postData += tagNova;
 
-          int post = httpPost.POST(postData); // Pegando a resposta da requisição POST
-          String payloadPost = httpPost.getString();
+          int post = httpPostNovoRegistro.POST(postData); // Pegando a resposta da requisição POST
+          String payloadPost = httpPostNovoRegistro.getString();
           //Serial.println(post);
 
           StaticJsonDocument<512> doc;
@@ -522,125 +524,119 @@ void newRegistration(){
             bool ok = doc["ok"];
             if (ok){
               Serial.println("CRACHÁ CADASTRADO COM SUCESSO!");
-              atualizaBackupUsuarios();
-            } else Serial.println("ERRO AO CADASTRAR CRACHÁ, TENTE NOVAMENTE REALIZAR O CADASTRO!");
+            } else {
+              Serial.println("ERRO AO CADASTRAR CRACHÁ, TENTE NOVAMENTE REALIZAR O CADASTRO!");
+            }
           }
       }
     } else {
       Serial.println("Nenhuma solicitação encontrada.");
     }
   } else Serial.println("Erro na requisição");
-  http.end();
+  httpNovoRegistro.end();
 }
 
 void atualizarModoAula() {
+  
+  HTTPClient httpModoAula;
 
-  bool modoAulaLocal;
+  if (mutexModoAula && xSemaphoreTake(mutexModoAula, portMAX_DELAY)){
 
-  if (xSemaphoreTake(mutexModoAula, portMAX_DELAY)){
-
-    modoAulaLocal = modoAula;
+    // Faz a requisição à uma API que compara o estado de modo aula do banco e o atual do ESP
+    httpModoAula.begin(strModoAula + "?lab=" + String(  lab13) + "&modoAula=" + modoAula);
     xSemaphoreGive(mutexModoAula);
+    int httpResponse = httpModoAula.GET();
+
+    if (httpResponse == 200){
+      String payload = httpModoAula.getString();
+
+      StaticJsonDocument<512> doc;
+      DeserializationError error = deserializeJson(doc, payload);
+
+      if (!error){
+        bool ok = doc["ok"];
+
+        if (ok){
+
+          bool diferente = doc["diferente"];
+
+          if (diferente){
+
+            if(mutexModoAula && xSemaphoreTake(mutexModoAula, portMAX_DELAY)){
+              modoAulaAtual = doc["modoAula"];
+              modoAula = modoAulaAtual;
+              xSemaphoreGive(mutexModoAula);
+            }
+            if (modoAulaAtual){
+              habilitaModoAula("aguarde");
+              Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
+              modoAula = modoAulaAtual;
+            } else if (modoAulaAtual == 0){
+              desabilitaModoAula();
+              Serial.println("MODO aula DESATIVADO!");
+              modoAula = modoAulaAtual;
+            }
+          } 
+        }
+      }  
+    } else Serial.println("Teste ok AtualizaModoAula"); xSemaphoreGive(mutexModoAula);
+    
+    httpModoAula.end();
   } 
-
-  // Faz a requisição à uma API que compara o estado de modo aula do banco e o atual do ESP
-  http.begin(strModoAula + "?lab=" + String(  lab13) + "&modoAula=" + modoAulaLocal);
-  
-  int httpResponse = http.GET();
-
-  if (httpResponse == 200){
-    String payload = http.getString();
-
-    StaticJsonDocument<512> doc;
-    DeserializationError error = deserializeJson(doc, payload);
-
-    if (!error){
-      bool ok = doc["ok"];
-
-      if (ok){
-
-        bool diferente = doc["diferente"];
-
-        if (diferente){
-
-          xSemaphoreTake(mutexModoAula, portMAX_DELAY);
-          modoAulaAtual = doc["modoAula"];
-          modoAula = modoAulaAtual;
-          xSemaphoreGive(mutexModoAula);
-
-          if (modoAulaAtual){
-            habilitaModoAula("aguarde");
-            Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
-            modoAula = modoAulaAtual;
-          } else if (modoAulaAtual == 0){
-            desabilitaModoAula();
-            Serial.println("MODO aula DESATIVADO!");
-            modoAula = modoAulaAtual;
-          }
-        } 
-      }
-    }  
-  } else Serial.println("Teste ok AtualizaModoAula"); xSemaphoreGive(mutexModoAula);
-  
-  http.end();
 }
 
 void leiaCracha () {
 
-  uint32_t tag = 0;
+  HTTPClient httpLeiaCracha;
 
-  if (tag = rdm.get_new_tag_id()) {
-    if (WiFi.status() == WL_CONNECTED){
+  if (uint32_t tag = rdm.get_new_tag_id()) {
 
-      http.begin(leitorCracha + "?cracha=" + tag + "&lab=" + String(lab13));
-      int httpResponse = http.GET();
+    httpLeiaCracha.begin(leitorCracha + "?cracha=" + tag + "&lab=" + String(lab13));
+    int httpResponse = httpLeiaCracha.GET();
 
-      if (httpResponse == 200){
-        String payload = http.getString();
+    if (httpResponse == 200){
+      String payload = httpLeiaCracha.getString();
 
-        StaticJsonDocument<512> doc;
-        DeserializationError error = deserializeJson(doc, payload);
+      StaticJsonDocument<512> doc;
+      DeserializationError error = deserializeJson(doc, payload);
 
-        if (!error){
-          bool autorizado = doc["autorizado"];
-          xSemaphoreTake(mutexModoAula, portMAX_DELAY);
+      if (!error){
+        bool autorizado = doc["autorizado"];
+        if (mutexModoAula && xSemaphoreTake(mutexModoAula, portMAX_DELAY)){
           modoAula = doc["modoAula"];
           xSemaphoreGive(mutexModoAula);
+        }
 
-          if (autorizado && modoAula == 0){
-            desabilitaModoAula();
-            Serial.println("MODO AULA DESATIVADO!");
-          } else if (autorizado && modoAula){
-            habilitaModoAula(String(tag));
-            Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
-          } else if (!autorizado){
-            Serial.println("ACESSO NEGADO!");
-          }
-        } 
-      }
-      http.end();
-    } else Serial.println("Teste ok LeiaCracha");
-  } else {
-    Serial.println("Sem conexão WIFI. Conectando com o backup.");
-    if (leiaCrachaBackup(String(tag))){
-      magnetizaPorta();
-    } else bip(3);
-  }
+        if (autorizado && modoAula == 0){
+          desabilitaModoAula();
+          Serial.println("MODO AULA DESATIVADO!");
+        } else if (autorizado && modoAula){
+          habilitaModoAula(String(tag));
+          Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
+        } else if (!autorizado){
+          Serial.println("ACESSO NEGADO!");
+        }
+      } 
+    }
+    httpLeiaCracha.end();
+  } else Serial.println("Teste ok LeiaCracha");
 }
 
 void habilitaModoAula(String crachaLido) {
 
+  HTTPClient httpHabilita;
+
   if (crachaLido != "aguarde") {
-    httpPost.begin(enviaHistorico);
-    httpPost.addHeader("Content-Type", "application/x-www-form-urlencoded");
+    httpHabilita.begin(enviaHistorico);
+    httpHabilita.addHeader("Content-Type", "application/x-www-form-urlencoded");
 
     String postData = "cracha=" + crachaLido + "&lab=" + String(lab13) + "&acao=on";
-    int httpResponse = httpPost.POST(postData);
+    int httpResponse = httpHabilita.POST(postData);
     Serial.println("Registrado novo evento!");
-    httpPost.end();
+    httpHabilita.end();
 
     /*
-    String payloadPost = httpPost.getString();
+    String payloadPost = httpHabilita.getString();
 
     
     StaticJsonDocument<512> doc;
