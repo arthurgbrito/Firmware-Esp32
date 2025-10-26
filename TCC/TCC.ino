@@ -69,7 +69,7 @@ String leitorCracha = "http://172.20.2.142/Fechadura_Eletronica/APIs/leiaCartao.
 String atualizaModoAula = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaModoAula.php";
 String enviaHistorico = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaHistorico.php";
 String consultaListaUsuarios = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaBackup.php";
-String atualizaEstadoPorta = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaEstadoPorta.php";
+String strAtualizaEstadoPorta = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaEstadoPorta.php";
 
 const char* localBackup = "/usuarios.json"; // Caminho do arquivo na memória
 
@@ -120,8 +120,7 @@ void setup() {
 
   WiFiManager wm; 
 
-  lcd.init();                      // initialize the lcd 
-  // Print a message to the LCD.
+  lcd.init();                    
   lcd.backlight();
   lcd.setCursor(3,0);
   lcd.print("Controle de");
@@ -181,7 +180,7 @@ void setup() {
 }
 
 void loop() {
-  verificaEstadoPorta();
+
 }
 
 
@@ -195,10 +194,11 @@ void TaskHTTP(void *pv){
     if (WiFi.status() == WL_CONNECTED){
       newRegistration(); // Monitora se existe algum registro novo no banco de dados
       atualizarModoAula(); // Atualiza o modo aula presente no esp, de acordo com o valor de modo aula do banco de dados, deixando os dois lugares sempre com o mesmo valor
+      FuncAtualizaEstadoPorta(); // Seta o estado da porta no banco de dados a partir do sensor lido pelo esp 
     }
 
     leiaCracha(); // Lê o crachá que está sendo aproximado
-    vTaskDelay(300/portTICK_PERIOD_MS);
+    vTaskDelay(200/portTICK_PERIOD_MS);
   }
 }
 
@@ -566,43 +566,41 @@ void newRegistration(){
 }
 
 
-void verificaEstadoPorta(){
+void FuncAtualizaEstadoPorta(){
   
   HTTPClient httpEstadoPorta;
   
-  if (WiFi.status() == WL_CONNECTED){
-    if (flagEstadoPorta){
+  if (flagEstadoPorta){
+  
+    httpEstadoPorta.begin(strAtualizaEstadoPorta); // Chama a API que atualiza o estado da porta para que o valor presente no esp e no banco seja igual
+    httpEstadoPorta.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+    String corpoRequisicao = "lab=";
+    corpoRequisicao += String(lab);
+    corpoRequisicao += "&estadoPorta=";
+    corpoRequisicao += estadoPortaAtual;
+
+    int httpResponse = httpEstadoPorta.POST(corpoRequisicao);  // Envia o corpo da requisição
     
-      httpEstadoPorta.begin(atualizaEstadoPorta); // Chama a API que atualiza o estado da porta para que o valor presente no esp e no banco seja igual
-      httpEstadoPorta.addHeader("Content-Type", "application/x-www-form-urlencoded");
+    // Prints para debug
+    /*if (httpResponse == 200){
 
-      String corpoRequisicao = "lab=";
-      corpoRequisicao += String(lab);
-      corpoRequisicao += "&estadoPorta=";
-      corpoRequisicao += estadoPortaAtual;
+      Serial.println("\n\nRequisição deu certo.\n");
+      String payloadPost = httpEstadoPorta.getString();
 
-      int httpResponse = httpEstadoPorta.POST(corpoRequisicao);  // Envia o corpo da requisição
-      
-      // Prints para debug
-      /*if (httpResponse == 200){
+      StaticJsonDocument<512> doc;
+      DeserializationError error = deserializeJson(doc, payloadPost);
 
-        Serial.println("\n\nRequisição deu certo.\n");
-        String payloadPost = httpEstadoPorta.getString();
+      bool ok = doc["ok"];
+      if (ok){
+        Serial.println("Requisição deu certo.");
+      } else Serial.println("Requisição deu errado.");
+    } else Serial.println("Erro na requisição do estado porta");*/
+    
 
-        StaticJsonDocument<512> doc;
-        DeserializationError error = deserializeJson(doc, payloadPost);
+    httpEstadoPorta.end();
 
-        bool ok = doc["ok"];
-        if (ok){
-          Serial.println("Requisição deu certo.");
-        } else Serial.println("Requisição deu errado.");
-      } else Serial.println("Erro na requisição do estado porta");*/
-      
-
-      httpEstadoPorta.end();
-
-      flagEstadoPorta = 0;
-    }
+    flagEstadoPorta = 0;
   }
 }
 
