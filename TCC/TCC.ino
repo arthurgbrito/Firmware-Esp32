@@ -1,4 +1,6 @@
 
+
+
 // includes de bibliotecas utilizadas
 #include <stdlib.h>
 #include <dummy.h>
@@ -12,7 +14,7 @@
 #include <Arduino.h>
 #include <LittleFS.h>
 #include <FS.h>
-//#include <LiquidCrystal_I2C.h>
+#include <LiquidCrystal_I2C.h>
 
 //variáveis que ajudam a contar o tempo
 unsigned long tempoAnterior = 0;
@@ -64,7 +66,7 @@ int proxModoAula = 0;
 String solicitacaoCadastro = "http://172.20.2.142/Fechadura_Eletronica/APIs/solicitacoes.php";
 String atualizaDB = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaDB.php";
 String leitorCracha = "http://172.20.2.142/Fechadura_Eletronica/APIs/leiaCartao.php";
-String strModoAula = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaModoAula.php";
+String atualizaModoAula = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaModoAula.php";
 String enviaHistorico = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaHistorico.php";
 String consultaListaUsuarios = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaBackup.php";
 String atualizaEstadoPorta = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaEstadoPorta.php";
@@ -80,13 +82,10 @@ Rdm6300 rdm;
 SemaphoreHandle_t mutexState;
 SemaphoreHandle_t mutexModoAula;
 
-/*
-#define col  16 //Define o número de colunas do display utilizado
-#define lin   2 //Define o número de linhas do display utilizado
-#define ende  0x3F //Define o endereço do display
 
-LiquidCrystal_I2C lcd(ende,16,2); //Cria o objeto lcd passando como parâmetros o endereço, o nº de colunas e o nº de linhas
-*/
+
+LiquidCrystal_I2C lcd(0x27,16,2); //Cria o objeto lcd passando como parâmetros o endereço, o nº de colunas e o nº de linhas
+
 
 // Função chamada pela a interrupção 
 void IRAM_ATTR toggleEstadoPorta(){
@@ -121,11 +120,11 @@ void setup() {
 
   WiFiManager wm; 
 
-/*
-  lcd.init(); //Inicializa a comunicação com o display já conectado
-  lcd.clear(); //Limpa a tela do display
-  lcd.backlight(); //Aciona a luz de fundo do display
-*/
+  lcd.init();                      // initialize the lcd 
+  // Print a message to the LCD.
+  lcd.backlight();
+  lcd.setCursor(3,0);
+  lcd.print("Controle de");
 
   // Inicialização das bibliotecas 
 
@@ -168,7 +167,7 @@ void setup() {
   }
 
   // Criação das tasks utilizadas no projeto
-  xTaskCreatePinnedToCore(TaskHTTP, "TaskHTTP", 4096, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(TaskHTTP, "TaskHTTP", 4096, NULL, 1, NULL, 0); 
   xTaskCreatePinnedToCore(TaskControleCarga, "TaskControleCarga", 4096, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(TaskModoAula, "TaskModoAula", 4096, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(TaskAtualizaDBLocal, "TaskAtualizaDBLocal", 8192, NULL, 1, NULL, 0);
@@ -194,11 +193,11 @@ void loop() {
 void TaskHTTP(void *pv){
   while(1){
     if (WiFi.status() == WL_CONNECTED){
-      newRegistration();
-      atualizarModoAula();
+      newRegistration(); // Monitora se existe algum registro novo no banco de dados
+      atualizarModoAula(); // Atualiza o modo aula presente no esp, de acordo com o valor de modo aula do banco de dados, deixando os dois lugares sempre com o mesmo valor
     }
 
-    leiaCracha();
+    leiaCracha(); // Lê o crachá que está sendo aproximado
     vTaskDelay(300/portTICK_PERIOD_MS);
   }
 }
@@ -298,7 +297,7 @@ void TaskModoAula(void *pv){ // Responsável por liberar a porta a partir do sen
 
 void TaskAtualizaDBLocal(void *pv){ // Monitora constantemente o banco para verificar se a tabela de lá está igual a tabela que está na memória do esp
   while (1){  
-    atualizaBackupUsuarios();
+    atualizaBackupUsuarios(); // A cada período pega os usuários e crachás do banco e traz para o backup no esp
 
     vTaskDelay(30 * 1000 / portTICK_PERIOD_MS);
   }
@@ -316,10 +315,10 @@ void atualizaBackupUsuarios(){
   Serial.println("Verificando atualizações no banco de dados de usuários...");
 
   httpBackup.begin(consultaListaUsuarios); // Pega as colunas de crachás e usuários do banco e envia como json
-  int httpResponse = httpBackup.GET();
+  int httpResponse = httpBackup.GET(); // Recebe o status da requisição
 
-  if (httpResponse == 200){ // Se a requisição der certo
-    String payloadBanco = httpBackup.getString(); // Pega o JSON do banco
+  if (httpResponse == 200){ // Se a requisição retornar o status 200, significa que a requisição deu certo
+    String payloadBanco = httpBackup.getString(); // Pega o JSON do banco que foi enviado pela API
     String payloadLocal = readJson(); // Pega o JSON da memória do ESP
 
     if (payloadBanco != payloadLocal){ // Se forem diferentes, exclui o que está na memória atualmente e salva o do banco
@@ -362,7 +361,7 @@ void SalvaJson(const String& jsonString){
   File file = LittleFS.open(localBackup, FILE_WRITE); // Tenta abrir o arquivo para a escrita
   if (!file) {
     Serial.println("Erro ao abrir arquivo para escrita.");
-    return;
+    return; // Se não conseguir abrir, retorna e não executa o resto da função
   }
 
   if (file.print(jsonString)) Serial.println("Banco de dados local atualizado com sucesso."); // Atualiza a memória do ESP 
@@ -380,7 +379,7 @@ bool leiaCrachaBackup(String tag){
   StaticJsonDocument<2048> doc;
   DeserializationError error = deserializeJson(doc, jsonContent);
 
-  if (error){
+  if (error){ // Se houver erro ao tentar deserializar, retorna e não executa a função
     Serial.print("Falha ao analisar JSON local: ");
     return false;
   }
@@ -414,28 +413,28 @@ float readVBat(){
     vTaskDelay(2 / portTICK_PERIOD_MS);
   }
   float mediaV = (soma / (float)Nleituras); // Faz a média das leituras
-  float Vdiv = ((mediaV/ADC_Max) * ADC_Ref); // Acha o valor em tensão
+  float Vdiv = ((mediaV/ADC_Max) * ADC_Ref); // Acha o valor em tensão e retorna
 
   return Vdiv;
 }
 
-void ReleOn(){
+void ReleOn(){ // Ativa o relé, chaveando o transistor
   digitalWrite(RelePin, 1);
   ultimaCarga = millis();
 }
 
-void ReleOff(){
+void ReleOff(){ // Desativa o relé, desligando o sinal da base do transistor
   digitalWrite(RelePin, 0);
   tempoInicioCarga = 0;
   ultimaCarga = millis();
 }
 
-void mededistancia(){
+void mededistancia(){ // Lê a distância a partir do sensor VL53L0X
   VL53L0X_RangingMeasurementData_t measure;
   lox.rangingTest(&measure, false);
   int medida = measure.RangeMilliMeter/10;
 
-  if (medida < 10){
+  if (medida < 10){ // Se alguém passar a mão na frente, magnetiza e libera a porta 
     Serial.print("\n\nPorta aberta\n\n");
     habilitaModoAula("aguarde");
   }
@@ -468,13 +467,13 @@ void desmagnetizaPorta(){
   digitalWrite(32, LOW); // buzzer
 }
 
-void bip(int repeticoes) {
+void bip(int repeticoes) { // Responsaável por fazer os bips no buzzer
   unsigned long tempoInicio = millis();
 
   for (int cont = 0; cont < repeticoes; cont++) {
     unsigned long t0 = millis();
 
-    // Bipe de 100 ms
+    // Bip de 100 ms
     while ((millis() - t0) < 100) {
       digitalWrite(32, HIGH);
     }
@@ -497,13 +496,19 @@ void bip(int repeticoes) {
         //////////////////////
 
 
+
+
+// MEXER NA FUNÇÃO ABAIXO
+
+
+
 void newRegistration(){
 
   HTTPClient httpNovoRegistro;
   HTTPClient httpPostNovoRegistro;
 
   httpNovoRegistro.begin(solicitacaoCadastro); // Faz a requisição http GET para a api responsável por verificar se há algum cadastro pendente
-  int httpResponse = httpNovoRegistro.GET();
+  int httpResponse = httpNovoRegistro.GET(); 
   //Serial.println(httpResponse);
   
   if (httpResponse == 200){ // Se a resposta do GET for igual a 200, significa que ocorreu tudo certo com a requisição
@@ -568,7 +573,7 @@ void verificaEstadoPorta(){
   if (WiFi.status() == WL_CONNECTED){
     if (flagEstadoPorta){
     
-      httpEstadoPorta.begin(atualizaEstadoPorta);
+      httpEstadoPorta.begin(atualizaEstadoPorta); // Chama a API que atualiza o estado da porta para que o valor presente no esp e no banco seja igual
       httpEstadoPorta.addHeader("Content-Type", "application/x-www-form-urlencoded");
 
       String corpoRequisicao = "lab=";
@@ -576,7 +581,9 @@ void verificaEstadoPorta(){
       corpoRequisicao += "&estadoPorta=";
       corpoRequisicao += estadoPortaAtual;
 
-      int httpResponse = httpEstadoPorta.POST(corpoRequisicao);
+      int httpResponse = httpEstadoPorta.POST(corpoRequisicao);  // Envia o corpo da requisição
+      
+      // Prints para debug
       /*if (httpResponse == 200){
 
         Serial.println("\n\nRequisição deu certo.\n");
@@ -605,8 +612,8 @@ void atualizarModoAula() {
 
   if (mutexModoAula && xSemaphoreTake(mutexModoAula, portMAX_DELAY)){
 
-    // Faz a requisição à uma API que compara o estado de modo aula do banco e o atual do ESP
-    httpModoAula.begin(strModoAula + "?lab=" + String(lab) + "&modoAula=" + modoAula);
+    // Faz a requisição à uma API que compara o estado de modo aula do banco e o atual do ESP para manter atualiado o valor de modo aula
+    httpModoAula.begin(atualizaModoAula + "?lab=" + String(lab) + "&modoAula=" + modoAula);
     xSemaphoreGive(mutexModoAula);
     int httpResponse = httpModoAula.GET();
 
@@ -614,27 +621,27 @@ void atualizarModoAula() {
       String payload = httpModoAula.getString();
 
       StaticJsonDocument<512> doc;
-      DeserializationError error = deserializeJson(doc, payload);
+      DeserializationError error = deserializeJson(doc, payload); // Deserializa o JSON enviado pela API
 
       if (!error){
-        bool ok = doc["ok"];
+        bool ok = doc["ok"]; 
 
-        if (ok){
+        if (ok){ // Se o valor de ok for true, retornado pela API, continua a lógica
 
           bool diferente = doc["diferente"];
 
-          if (diferente){
+          if (diferente){ // Se diferente for true (Se foi mudado o modo aula pelo site), significa que é preciso atualizar o valor local de modo aula
 
             if(mutexModoAula && xSemaphoreTake(mutexModoAula, portMAX_DELAY)){
               modoAulaAtual = doc["modoAula"];
-              modoAula = modoAulaAtual;
+              modoAula = modoAulaAtual; // Atualiza o valor de modo aula local
               xSemaphoreGive(mutexModoAula);
             }
-            if (modoAulaAtual){
+            if (modoAulaAtual){ // Habilita o modo aula
               habilitaModoAula("aguarde");
               Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
               modoAula = modoAulaAtual;
-            } else if (modoAulaAtual == 0){
+            } else if (modoAulaAtual == 0){ // Desabilita o modo aula 
               desabilitaModoAula();
               Serial.println("MODO aula DESATIVADO!");
               modoAula = modoAulaAtual;
@@ -648,48 +655,62 @@ void atualizarModoAula() {
   } 
 }
 
+
+
+
+
+// MEXER NA FUNÇÃO ABAIXO
+
+
+
+
+
 void leiaCracha () {
 
   HTTPClient httpLeiaCracha;
+  uint32_t tag = rdm.get_new_tag_id();
 
-  if (WiFi.status() == WL_CONNECTED){
-    if (uint32_t tag = rdm.get_new_tag_id()) {
+  if (WiFi.status() == WL_CONNECTED){ // Se a internet estiver conectada, busca o banco de dados para a verificação
+    if (tag = rdm.get_new_tag_id()) {
 
-      httpLeiaCracha.begin(leitorCracha + "?cracha=" + tag + "&lab=" + String(lab));
+      httpLeiaCracha.begin(leitorCracha + "?cracha=" + tag + "&lab=" + String(lab)); // Envia uma requisição para a API que irá verificar se o crachá existe no banco e irá inverter o estado de modo aula
       int httpResponse = httpLeiaCracha.GET();
 
-      if (httpResponse == 200){
-        String payload = httpLeiaCracha.getString();
+      if (httpResponse == 200){ // Se a requisição tiver sucesso
+        String payload = httpLeiaCracha.getString(); // Pega o JSON enviado pela API
 
+        // Deserializa ele
         StaticJsonDocument<512> doc;
         DeserializationError error = deserializeJson(doc, payload);
 
-        if (!error){
-          bool autorizado = doc["autorizado"];
+        if (!error){ // Se não der erro
+          bool autorizado = doc["autorizado"]; // Pega o valor retornado pela API de autorizado
           if (mutexModoAula && xSemaphoreTake(mutexModoAula, portMAX_DELAY)){
-            modoAula = doc["modoAula"];
+            modoAula = doc["modoAula"]; // Pega o valor de modo aula
             xSemaphoreGive(mutexModoAula);
           }
 
-          if (autorizado && modoAula == 0){
-            desabilitaModoAula();
+          if (autorizado && modoAula == 0){ // Se for autorizado e o novo modo aula for desligado
+            desabilitaModoAula(); // Desabilita o modo aula 
             Serial.println("MODO AULA DESATIVADO!");
-          } else if (autorizado && modoAula){
-            habilitaModoAula(String(tag));
+          } else if (autorizado && modoAula){ // Se for autorizado e o novo modo aula for ligado
+            habilitaModoAula(String(tag)); // Habilita o modo aula
             Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
-          } else if (!autorizado){
+          } else if (!autorizado){ // Se não for autorizado, rejeita o pedido 
             Serial.println("ACESSO NEGADO!");
           }
         } 
       }
       httpLeiaCracha.end();
     } else Serial.println("Teste ok LeiaCracha");
-  } else {
-    if (leiaCrachaBackup(String(tag)))
+  } else { // Se a internet não estiver conectada, busca a memória local para verificar permissões de crachás
+    if (leiaCrachaBackup(String(tag))){ // Se o crachá estiver na memória, permite o acesso, se não, não
+      Serial.println("Acesso liberado.");
+    } else Serial.println("Acesso negado");
   }
 }
 
-void habilitaModoAula(String crachaLido) {
+void habilitaModoAula(String crachaLido) { // Função que habilita o modo aula e atualiza o histórico
 
   HTTPClient httpHabilita;
 
@@ -698,10 +719,10 @@ void habilitaModoAula(String crachaLido) {
     httpHabilita.addHeader("Content-Type", "application/x-www-form-urlencoded");
 
     String postData = "cracha=" + crachaLido + "&lab=" + String(lab) + "&acao=on";
-    int httpResponse = httpHabilita.POST(postData);
+    int httpResponse = httpHabilita.POST(postData); // Envia os dados necessários para criar uma nova linha na tabela de histórico
     Serial.println("Registrado novo evento!");
-    httpHabilita.end();
 
+    // Prints de debug
     /*
     String payloadPost = httpHabilita.getString();
 
@@ -720,6 +741,7 @@ void habilitaModoAula(String crachaLido) {
     }*/
   }
 
+  httpHabilita.end();
 
   digitalWrite(LED_PIN, HIGH); // LED branco
   magnetizaPorta();
