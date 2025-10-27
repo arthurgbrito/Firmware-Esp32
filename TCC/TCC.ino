@@ -28,7 +28,7 @@ int piscarAtivo = 0;
 #define RDM_TX 4
 #define LED_PIN 26
 #define Buzzer 32
-#define reedPin 14
+#define reedPin 12
 #define led_internet 25
 #define adcBat 34
 #define RelePin 14
@@ -63,13 +63,13 @@ const unsigned long intervalo = 2000;
 int proxModoAula = 0;
 
 // URLs para as requisições HTTP utilizadas para acessar APIs
-String solicitacaoCadastro = "http://172.20.2.142/Fechadura_Eletronica/APIs/solicitacoes.php";
-String atualizaDB = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaDB.php";
-String leitorCracha = "http://172.20.2.142/Fechadura_Eletronica/APIs/leiaCartao.php";
-String atualizaModoAula = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaModoAula.php";
-String enviaHistorico = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaHistorico.php";
-String consultaListaUsuarios = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaBackup.php";
-String strAtualizaEstadoPorta = "http://172.20.2.142/Fechadura_Eletronica/APIs/atualizaEstadoPorta.php";
+String solicitacaoCadastro = "http://192.168.1.8/Fechadura_Eletronica/APIs/solicitacoes.php";
+String atualizaDB = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaDB.php";
+String leitorCracha = "http://192.168.1.8/Fechadura_Eletronica/APIs/leiaCartao.php";
+String atualizaModoAula = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaModoAula.php";
+String enviaHistorico = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaHistorico.php";
+String consultaListaUsuarios = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaBackup.php";
+String strAtualizaEstadoPorta = "http://192.168.1.8/Fechadura_Eletronica/APIs/atualizaEstadoPorta.php";
 
 const char* localBackup = "/usuarios.json"; // Caminho do arquivo na memória
 
@@ -83,7 +83,8 @@ SemaphoreHandle_t mutexState;
 SemaphoreHandle_t mutexModoAula;
 
 
-
+String mensagem = "Controle de Acesso - Curso de Eletronica ";
+int habilitaFrasePrincipal = 1;
 LiquidCrystal_I2C lcd(0x27,16,2); //Cria o objeto lcd passando como parâmetros o endereço, o nº de colunas e o nº de linhas
 
 
@@ -120,10 +121,11 @@ void setup() {
 
   WiFiManager wm; 
 
-  lcd.init();                    
+  lcd.begin(16, 2);
+  lcd.init();
   lcd.backlight();
-  lcd.setCursor(3,0);
-  lcd.print("Controle de");
+  lcd.setCursor(0,0);
+  lcd.print("Controle de Acesso - Curso de Eletronica");
 
   // Inicialização das bibliotecas 
 
@@ -170,6 +172,7 @@ void setup() {
   xTaskCreatePinnedToCore(TaskControleCarga, "TaskControleCarga", 4096, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(TaskModoAula, "TaskModoAula", 4096, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(TaskAtualizaDBLocal, "TaskAtualizaDBLocal", 8192, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(TaskFrasePrincipal, "TaskFrasePrincipal", 2048, NULL, 1, NULL, 1);
   attachInterrupt(digitalPinToInterrupt(reedPin), toggleEstadoPorta, CHANGE);
 
   // Inicialização do sensor de distância
@@ -180,12 +183,39 @@ void setup() {
 }
 
 void loop() {
+  vTaskDelay(1000/portTICK_PERIOD_MS);
+}
 
+
+
+void TaskFrasePrincipal(void *pv){
+  while (1){
+
+    int posFinal = 0;
+    int espacoSobrando = 0;
+    for (int c = 0; c <= mensagem.length() - 1; c++) {
+      if (habilitaFrasePrincipal){
+        lcd.clear();
+        lcd.setCursor(0,0);
+        posFinal = c + 16;
+        if (posFinal > mensagem.length() - 1) {
+          espacoSobrando = posFinal - mensagem.length();
+          lcd.print(mensagem.substring(c, mensagem.length() - 1));
+          lcd.setCursor(mensagem.length() - c, 0);
+          lcd.print(mensagem.substring(0, espacoSobrando));
+          vTaskDelay(400/portTICK_PERIOD_MS);
+        } else {
+          lcd.print(mensagem.substring(c, posFinal));
+          vTaskDelay(400/portTICK_PERIOD_MS);
+        }
+      }
+    }
+  }
 }
 
 
         ///////////////////////////////////
-        ///  TASK DE REQUISIÇÕES HTTP   ///
+        ///  TASK COM REQUISIÇÕES HTTP   ///
         //////////////////////////////////
 
 
@@ -635,19 +665,43 @@ void atualizarModoAula() {
               modoAula = modoAulaAtual; // Atualiza o valor de modo aula local
               xSemaphoreGive(mutexModoAula);
             }
+
+            habilitaFrasePrincipal = 0;
             if (modoAulaAtual){ // Habilita o modo aula
-              habilitaModoAula("aguarde");
               Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
               modoAula = modoAulaAtual;
+
+              lcd.clear();
+              lcd.setCursor(0, 0);
+              lcd.print("Acesso liberado!");
+              habilitaModoAula("aguarde");
+              lcd.clear();
+              lcd.setCursor(4, 0);
+              lcd.print("Modo aula");
+              lcd.setCursor(5, 1);
+              lcd.print("ativado");
+              vTaskDelay(2000 / portTICK_PERIOD_MS);
+              habilitaFrasePrincipal = 1;
             } else if (modoAulaAtual == 0){ // Desabilita o modo aula 
-              desabilitaModoAula();
               Serial.println("MODO aula DESATIVADO!");
               modoAula = modoAulaAtual;
+
+              lcd.clear();
+              lcd.setCursor(0, 0);
+              lcd.print("Acesso liberado!");
+              desabilitaModoAula();
+              lcd.clear();
+              lcd.setCursor(4, 0);
+              lcd.print("Modo aula");
+              lcd.setCursor(3, 1);
+              lcd.print("desativado");
+              vTaskDelay(2000 / portTICK_PERIOD_MS);
+              habilitaFrasePrincipal = 1;
             }
           } 
         }
       }  
-    } else Serial.println("Teste ok AtualizaModoAula"); xSemaphoreGive(mutexModoAula);
+    } else Serial.println("Teste ok AtualizaModoAula"); 
     
     httpModoAula.end();
   } 
@@ -687,15 +741,44 @@ void leiaCracha () {
             modoAula = doc["modoAula"]; // Pega o valor de modo aula
             xSemaphoreGive(mutexModoAula);
           }
-
+          
+          habilitaFrasePrincipal = 0;
           if (autorizado && modoAula == 0){ // Se for autorizado e o novo modo aula for desligado
-            desabilitaModoAula(); // Desabilita o modo aula 
             Serial.println("MODO AULA DESATIVADO!");
+            
+            lcd.clear();
+            lcd.setCursor(0, 0);
+            lcd.print("Acesso liberado!");
+            desabilitaModoAula(); // Desabilita o modo aula 
+            lcd.clear();
+            lcd.setCursor(4, 0);
+            lcd.print("Modo aula");
+            lcd.setCursor(3, 1);
+            lcd.print("desativado");
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+            habilitaFrasePrincipal = 1;
           } else if (autorizado && modoAula){ // Se for autorizado e o novo modo aula for ligado
-            habilitaModoAula(String(tag)); // Habilita o modo aula
             Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
+
+            lcd.clear();
+            lcd.setCursor(0, 0);
+            lcd.print("Acesso liberado!");
+            habilitaModoAula(String(tag)); // Habilita o modo aula
+            lcd.clear();
+            lcd.setCursor(4, 0);
+            lcd.print("Modo aula");
+            lcd.setCursor(5, 1);
+            lcd.print("ativado");
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+            habilitaFrasePrincipal = 1;
           } else if (!autorizado){ // Se não for autorizado, rejeita o pedido 
             Serial.println("ACESSO NEGADO!");
+
+            lcd.clear();
+            lcd.setCursor(1, 0);
+            lcd.print("Acesso negado!");
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+            habilitaFrasePrincipal = 1;
           }
         } 
       }
