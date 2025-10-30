@@ -1,12 +1,11 @@
 
 
-
 // includes de bibliotecas utilizadas
 #include <stdlib.h>
 #include <dummy.h>
 #include <Wire.h>
 #include "Adafruit_VL53L0X.h"
-#include <rdm6300.h>
+#include <MFRC522.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <WiFiManager.h>
@@ -15,6 +14,7 @@
 #include <LittleFS.h>
 #include <FS.h>
 #include <LiquidCrystal_I2C.h>
+#include <SPI.h>
 
 //variáveis que ajudam a contar o tempo
 unsigned long tempoAnterior = 0;
@@ -24,14 +24,16 @@ int piscarAtivo = 0;
 #define lab 9
 
 //Pinos do ESP
-#define RDM_RX 5 
-#define RDM_TX 4
-#define LED_PIN 26
-#define Buzzer 32
-#define reedPin 12
-#define led_internet 25
+#define RFID_SDA 5
+#define RFID_RST 4
+#define led_fechadura 26 // led da direita
+#define led_modoAula 13 // led do meio
+#define led_internet 25 // led da esquerda
 #define adcBat 34
 #define RelePin 14
+#define buzzer 32
+#define reedPin 12
+#define fechadura 27
 
 // Variáveis de controle para o estado da porta
 unsigned long ultimaMudanca = 0;
@@ -76,24 +78,23 @@ const char* localBackup = "/usuarios.json"; // Caminho do arquivo na memória
 // Inicialização de variáveis de bibliotecas
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
 //HardwareSerial RFIDserial(1);
-Rdm6300 rdm;
+MFRC522 rfid(RFID_SDA, RFID_RST);
 
 // Inicialização das variáveis MUTEX, responsáveis por ""blindar"" as variáveis que são acessadas em mais de uma TASK ao mesmo tempo
 SemaphoreHandle_t mutexState;
 SemaphoreHandle_t mutexModoAula;
 
-
+// Display LCD 16x2
 String mensagem = "Controle de Acesso - Curso de Eletronica ";
 int habilitaFrasePrincipal = 1;
 LiquidCrystal_I2C lcd(0x27,16,2); //Cria o objeto lcd passando como parâmetros o endereço, o nº de colunas e o nº de linhas
-
 
 // Função chamada pela a interrupção 
 void IRAM_ATTR toggleEstadoPorta(){
   unsigned long agora = millis();
   if ((agora - ultimaMudanca) > 100){
-    estadoPortaAtual = digitalRead(reedPin);
-    flagEstadoPorta = true;
+    estadoPortaAtual = digitalRead(reedPin); // Recebe o estado da porta
+    flagEstadoPorta = true; // Seta a tag, sinalizando a mudança de estado da porta
     ultimaMudanca = agora;
   }
 }
@@ -128,21 +129,20 @@ void setup() {
   lcd.print("Controle de Acesso - Curso de Eletronica");
 
   // Inicialização das bibliotecas 
-
-  //RFIDserial.begin(9600, SERIAL_8N1, RDM_RX, RDM_TX);
-  //rdm.begin(&RFIDserial);
+  SPI.begin();
+  rfid.PCD_Init();
 
   // Inicialização de pinos
   pinMode(RelePin, OUTPUT);
   digitalWrite(RelePin, 0);
-  pinMode(27, OUTPUT);
+  pinMode(fechadura, OUTPUT);
   pinMode(led_internet, OUTPUT);
-  pinMode(19, OUTPUT);
-  pinMode(18, OUTPUT);
-  pinMode(13, OUTPUT);
-  pinMode(32, OUTPUT);
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
+  //pinMode(19, OUTPUT);
+  //pinMode(18, OUTPUT);
+  pinMode(led_modoAula, OUTPUT);
+  pinMode(buzzer, OUTPUT);
+  pinMode(led_fechadura, OUTPUT);
+  digitalWrite(led_fechadura, LOW);
   pinMode(reedPin, INPUT_PULLUP);
 
   // Inicialização dos pinos ADC
@@ -169,9 +169,10 @@ void setup() {
 
   // Criação das tasks utilizadas no projeto
   xTaskCreatePinnedToCore(TaskHTTP, "TaskHTTP", 4096, NULL, 1, NULL, 0); 
+  xTaskCreatePinnedToCore(TaskNovoRegistro, "TaskNovoRegistro", 4096, NULL, 1, NULL, 0); 
+  xTaskCreatePinnedToCore(TaskAtualizaDBLocal, "TaskAtualizaDBLocal", 8192, NULL, 1, NULL, 0);
   xTaskCreatePinnedToCore(TaskControleCarga, "TaskControleCarga", 4096, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(TaskModoAula, "TaskModoAula", 4096, NULL, 1, NULL, 1);
-  xTaskCreatePinnedToCore(TaskAtualizaDBLocal, "TaskAtualizaDBLocal", 8192, NULL, 1, NULL, 0);
   xTaskCreatePinnedToCore(TaskFrasePrincipal, "TaskFrasePrincipal", 2048, NULL, 1, NULL, 1);
   attachInterrupt(digitalPinToInterrupt(reedPin), toggleEstadoPorta, CHANGE);
 
@@ -214,15 +215,30 @@ void TaskFrasePrincipal(void *pv){
 }
 
 
-        ///////////////////////////////////
+        ////////////////////////////////////////////
+        ///  TASK QUE MONITORA NOVOS REGISTROS   ///
+        ///////////////////////////////////////////
+
+
+void TaskNovoRegistro(void *pv){
+  while(1){
+    if (WiFi.status() == WL_CONNECTED){
+      newRegistration(); // Monitora se existe algum registro novo no banco de dados
+    }
+
+    vTaskDelay(100/portTICK_PERIOD_MS);
+  }
+}
+
+
+        ////////////////////////////////////
         ///  TASK COM REQUISIÇÕES HTTP   ///
-        //////////////////////////////////
+        ////////////////////////////////////
 
 
 void TaskHTTP(void *pv){
   while(1){
     if (WiFi.status() == WL_CONNECTED){
-      newRegistration(); // Monitora se existe algum registro novo no banco de dados
       atualizarModoAula(); // Atualiza o modo aula presente no esp, de acordo com o valor de modo aula do banco de dados, deixando os dois lugares sempre com o mesmo valor
       FuncAtualizaEstadoPorta(); // Seta o estado da porta no banco de dados a partir do sensor lido pelo esp 
     }
@@ -464,40 +480,32 @@ void mededistancia(){ // Lê a distância a partir do sensor VL53L0X
   lox.rangingTest(&measure, false);
   int medida = measure.RangeMilliMeter/10;
 
-  if (medida < 10){ // Se alguém passar a mão na frente, magnetiza e libera a porta 
+  if (medida < 20){ // Se alguém passar a mão na frente, magnetiza e libera a porta 
     Serial.print("\n\nPorta aberta\n\n");
-    habilitaModoAula("aguarde");
+    habilitaModoAula("SemCracha");
   }
 
   vTaskDelay(100 / portTICK_PERIOD_MS);
 }
 
 void desabilitaModoAula(){
-  digitalWrite(13, LOW); // LED branco
-  digitalWrite(19, LOW);  // LED verde
-  digitalWrite(18, HIGH); // LED vermelho
-  digitalWrite(27, LOW);
+  digitalWrite(led_modoAula, LOW); 
+  digitalWrite(fechadura, LOW);
   bip(2);
-  digitalWrite(32, LOW); // buzzer
 }
 
 void magnetizaPorta(){
-  digitalWrite(19, HIGH); // LED verde
-  digitalWrite(18, LOW);  // LED vermelho
-  digitalWrite(27, HIGH); // Fechadura
-
+  digitalWrite(led_fechadura, HIGH);
+  digitalWrite(fechadura, HIGH); 
   bip(1);
 }
 
 void desmagnetizaPorta(){
-  digitalWrite(19, LOW);  // LED verde
-  digitalWrite(18, HIGH); // LED vermelho
-  digitalWrite(27, LOW);
-  digitalWrite(LED_PIN, HIGH);
-  digitalWrite(32, LOW); // buzzer
+  digitalWrite(led_fechadura, LOW);
+  digitalWrite(fechadura, LOW);
 }
 
-void bip(int repeticoes) { // Responsaável por fazer os bips no buzzer
+void bip(int repeticoes) { // Responsável por fazer os bips no buzzer
   unsigned long tempoInicio = millis();
 
   for (int cont = 0; cont < repeticoes; cont++) {
@@ -505,19 +513,29 @@ void bip(int repeticoes) { // Responsaável por fazer os bips no buzzer
 
     // Bip de 100 ms
     while ((millis() - t0) < 100) {
-      digitalWrite(32, HIGH);
+      digitalWrite(buzzer, HIGH);
     }
 
     // Pausa de 100 ms entre bipes
     while ((millis() - t0) < 200) {
-      digitalWrite(32, LOW);
+      digitalWrite(buzzer, LOW);
     }
   }
 
   // Espera o tempo restante até completar 2000 ms no total
   while ((millis() - tempoInicio) < 2000) {
-    digitalWrite(32, LOW);
+    digitalWrite(buzzer, LOW);
   }
+}
+
+String getUIDString(MFRC522::Uid &uid) {
+  String uidStr = "";
+  for (byte i = 0; i < uid.size; i++) {
+    if (uid.uidByte[i] < 0x10) uidStr += "0";
+    uidStr += String(uid.uidByte[i], HEX);
+  }
+  uidStr.toUpperCase();
+  return uidStr;
 }
 
 
@@ -549,44 +567,55 @@ void newRegistration(){
       Serial.println("Nova solicitação encontrada.");
       
       StaticJsonDocument<512> doc; // decodifica o JSON a partir da variável doc 
-      
       DeserializationError error = deserializeJson(doc, payload);
+
       if (!error) {
         const char* id = doc["id"];
         int id_solicitante = atoi(id); // id do usuário que fez o cadastro
+        unsigned long tempoInicial = millis();
 
-        uint32_t tagNova = rdm.get_new_tag_id();
+        while (rfid.PICC_IsNewCardPresent() == 0 || rfid.PICC_ReadCardSerial() == 0) {
+          vTaskDelay(50 / portTICK_PERIOD_MS);  // Libera CPU para evitar WDT
 
-        while (( tagNova = rdm.get_new_tag_id()) == 0); // Tag a ser cadastrada
-          digitalWrite(LED_PIN, HIGH);
-          bip(1);
-          Serial.println("Cartão lido");
-
-          httpPostNovoRegistro.begin(atualizaDB); // Faz a requisição para outra API para atualizar o banco de dados com as informações do usuário e da TAG
-
-          httpPostNovoRegistro.addHeader("Content-Type", "application/x-www-form-urlencoded"); // aponta qual vai ser o método de envio das informações por meio da URL
-
-          // Construção da URL de resposta
-          String postData = "id_solicitacao=";
-          postData += String(id_solicitante);
-          postData += "&cracha=";
-          postData += tagNova;
-
-          int post = httpPostNovoRegistro.POST(postData); // Pegando a resposta da requisição POST
-          String payloadPost = httpPostNovoRegistro.getString();
-          //Serial.println(post);
-
-          StaticJsonDocument<512> doc;
-          DeserializationError error = deserializeJson(doc, payloadPost);
-
-          if (!error){
-            bool ok = doc["ok"];
-            if (ok){
-              Serial.println("CRACHÁ CADASTRADO COM SUCESSO!");
-            } else {
-              Serial.println("ERRO AO CADASTRAR CRACHÁ, TENTE NOVAMENTE REALIZAR O CADASTRO!");
-            }
+          if (millis() - tempoInicial > 10000) { // Timeout de 10s
+            Serial.println("Tempo limite para leitura de cartão excedido.");
+            return; // Sai da função se ninguém aproximar o cartão
           }
+        }
+
+        String tag = getUIDString(rfid.uid);
+        Serial.println(tag);
+
+        bip(1);
+        Serial.println("Cartão lido");
+
+        httpPostNovoRegistro.begin(atualizaDB); // Faz a requisição para outra API para atualizar o banco de dados com as informações do usuário e da TAG
+
+        httpPostNovoRegistro.addHeader("Content-Type", "application/x-www-form-urlencoded"); // aponta qual vai ser o método de envio das informações por meio da URL
+
+        // Construção da URL de resposta
+        String postData = "id_solicitacao=";
+        postData += String(id_solicitante);
+        postData += "&cracha=";
+        postData += tag;
+
+        int post = httpPostNovoRegistro.POST(postData); // Pegando a resposta da requisição POST
+        String payloadPost = httpPostNovoRegistro.getString();
+        //Serial.println(post);
+
+        StaticJsonDocument<512> doc;
+        DeserializationError error = deserializeJson(doc, payloadPost);
+
+        if (!error){
+          bool ok = doc["ok"];
+          if (ok){
+            Serial.println("CRACHÁ CADASTRADO COM SUCESSO!");
+          } else {
+            Serial.println("ERRO AO CADASTRAR CRACHÁ, TENTE NOVAMENTE REALIZAR O CADASTRO!");
+          }
+        }
+
+        rfid.PICC_HaltA();
       }
     } else {
       Serial.println("Nenhuma solicitação encontrada.");
@@ -674,7 +703,7 @@ void atualizarModoAula() {
               lcd.clear();
               lcd.setCursor(0, 0);
               lcd.print("Acesso liberado!");
-              habilitaModoAula("aguarde");
+              habilitaModoAula("SemCracha");
               lcd.clear();
               lcd.setCursor(4, 0);
               lcd.print("Modo aula");
@@ -720,72 +749,75 @@ void atualizarModoAula() {
 void leiaCracha () {
 
   HTTPClient httpLeiaCracha;
-  uint32_t tag = rdm.get_new_tag_id();
+
+  if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) return;
+  String tag = getUIDString(rfid.uid);
 
   if (WiFi.status() == WL_CONNECTED){ // Se a internet estiver conectada, busca o banco de dados para a verificação
-    if (tag = rdm.get_new_tag_id()) {
 
-      httpLeiaCracha.begin(leitorCracha + "?cracha=" + tag + "&lab=" + String(lab)); // Envia uma requisição para a API que irá verificar se o crachá existe no banco e irá inverter o estado de modo aula
-      int httpResponse = httpLeiaCracha.GET();
+    httpLeiaCracha.begin(leitorCracha + "?cracha=" + tag + "&lab=" + String(lab)); // Envia uma requisição para a API que irá verificar se o crachá existe no banco e irá inverter o estado de modo aula
+    int httpResponse = httpLeiaCracha.GET();
 
-      if (httpResponse == 200){ // Se a requisição tiver sucesso
-        String payload = httpLeiaCracha.getString(); // Pega o JSON enviado pela API
+    if (httpResponse == 200){ // Se a requisição tiver sucesso
+      String payload = httpLeiaCracha.getString(); // Pega o JSON enviado pela API
 
-        // Deserializa ele
-        StaticJsonDocument<512> doc;
-        DeserializationError error = deserializeJson(doc, payload);
+      // Deserializa ele
+      StaticJsonDocument<512> doc;
+      DeserializationError error = deserializeJson(doc, payload);
 
-        if (!error){ // Se não der erro
-          bool autorizado = doc["autorizado"]; // Pega o valor retornado pela API de autorizado
-          if (mutexModoAula && xSemaphoreTake(mutexModoAula, portMAX_DELAY)){
-            modoAula = doc["modoAula"]; // Pega o valor de modo aula
-            xSemaphoreGive(mutexModoAula);
-          }
+      if (!error){ // Se não der erro
+        bool autorizado = doc["autorizado"]; // Pega o valor retornado pela API de autorizado
+        if (mutexModoAula && xSemaphoreTake(mutexModoAula, portMAX_DELAY)){
+          modoAula = doc["modoAula"]; // Pega o valor de modo aula
+          xSemaphoreGive(mutexModoAula);
+        }
+        
+        habilitaFrasePrincipal = 0;
+        if (autorizado && modoAula == 0){ // Se for autorizado e o novo modo aula for desligado
+          Serial.println("MODO AULA DESATIVADO!");
           
-          habilitaFrasePrincipal = 0;
-          if (autorizado && modoAula == 0){ // Se for autorizado e o novo modo aula for desligado
-            Serial.println("MODO AULA DESATIVADO!");
-            
-            lcd.clear();
-            lcd.setCursor(0, 0);
-            lcd.print("Acesso liberado!");
-            desabilitaModoAula(); // Desabilita o modo aula 
-            lcd.clear();
-            lcd.setCursor(4, 0);
-            lcd.print("Modo aula");
-            lcd.setCursor(3, 1);
-            lcd.print("desativado");
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-            habilitaFrasePrincipal = 1;
-          } else if (autorizado && modoAula){ // Se for autorizado e o novo modo aula for ligado
-            Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print("Acesso liberado!");
+          desabilitaModoAula(); // Desabilita o modo aula 
+          lcd.clear();
+          lcd.setCursor(4, 0);
+          lcd.print("Modo aula");
+          lcd.setCursor(3, 1);
+          lcd.print("desativado");
+          vTaskDelay(1000 / portTICK_PERIOD_MS);
+          habilitaFrasePrincipal = 1;
+        } else if (autorizado && modoAula){ // Se for autorizado e o novo modo aula for ligado
+          Serial.println("ACESSO LIBERADO! MODO AULA ATIVADO!");
 
-            lcd.clear();
-            lcd.setCursor(0, 0);
-            lcd.print("Acesso liberado!");
-            habilitaModoAula(String(tag)); // Habilita o modo aula
-            lcd.clear();
-            lcd.setCursor(4, 0);
-            lcd.print("Modo aula");
-            lcd.setCursor(5, 1);
-            lcd.print("ativado");
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-            habilitaFrasePrincipal = 1;
-          } else if (!autorizado){ // Se não for autorizado, rejeita o pedido 
-            Serial.println("ACESSO NEGADO!");
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print("Acesso liberado!");
+          habilitaModoAula(tag); // Habilita o modo aula
+          lcd.clear();
+          lcd.setCursor(4, 0);
+          lcd.print("Modo aula");
+          lcd.setCursor(5, 1);
+          lcd.print("ativado");
+          vTaskDelay(1000 / portTICK_PERIOD_MS);
+          habilitaFrasePrincipal = 1;
+        } else if (!autorizado){ // Se não for autorizado, rejeita o pedido 
+          Serial.println("ACESSO NEGADO!");
 
-            lcd.clear();
-            lcd.setCursor(1, 0);
-            lcd.print("Acesso negado!");
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
-            habilitaFrasePrincipal = 1;
-          }
-        } 
-      }
-      httpLeiaCracha.end();
-    } else Serial.println("Teste ok LeiaCracha");
+          lcd.clear();
+          lcd.setCursor(1, 0);
+          lcd.print("Acesso negado!");
+          vTaskDelay(1000 / portTICK_PERIOD_MS);
+          habilitaFrasePrincipal = 1;
+        }
+      } 
+    }
+
+    httpLeiaCracha.end();
+    rfid.PICC_HaltA();  
+
   } else { // Se a internet não estiver conectada, busca a memória local para verificar permissões de crachás
-    if (leiaCrachaBackup(String(tag))){ // Se o crachá estiver na memória, permite o acesso, se não, não
+    if (leiaCrachaBackup(tag)){ // Se o crachá estiver na memória, permite o acesso, se não, não
       Serial.println("Acesso liberado.");
     } else Serial.println("Acesso negado");
   }
@@ -795,7 +827,7 @@ void habilitaModoAula(String crachaLido) { // Função que habilita o modo aula 
 
   HTTPClient httpHabilita;
 
-  if (crachaLido != "aguarde") {
+  if (crachaLido != "SemCracha") {
     httpHabilita.begin(enviaHistorico);
     httpHabilita.addHeader("Content-Type", "application/x-www-form-urlencoded");
 
@@ -824,7 +856,7 @@ void habilitaModoAula(String crachaLido) { // Função que habilita o modo aula 
 
   httpHabilita.end();
 
-  digitalWrite(LED_PIN, HIGH); // LED branco
+  digitalWrite(led_modoAula, HIGH);
   magnetizaPorta();
   desmagnetizaPorta();
 }
