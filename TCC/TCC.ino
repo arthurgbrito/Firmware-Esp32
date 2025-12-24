@@ -27,67 +27,69 @@ int piscarAtivo = 0;
 
 
 //Pinos do ESP
-#define RFID_SDA 5
-#define RFID_RST 4
+
+  //Pinos leitor RFID
+#define RFID_SDA 5 // SDA do leitor RFID
+#define RFID_RST 4 // RESET do leitor RFID 
+
+  //Pinos que ATIVAM algo
 #define led_fechadura 26 // led da direita
 #define led_modoAula 13 // led do meio
 #define led_internet 25 // led da esquerda
-#define adcBat 34
-#define RelePin 14
-#define buzzer 32
-#define reedPin 12
-#define fechadura 27
+#define buzzer 32 // Pino do buzzer
+#define RelePin 14 // Pino que ativa o Relé 
+#define fechadura 27 // Pino da fechadura
 
+  // Pinos que LEEM algo
+#define adcBat 34 // Pino que lê a tensão da Bateria
+#define reedPin 12 // Pino do Reed Switch
+
+  // Parâmetros
+#define VminCarga 1.80 // Tensão mínima comparada na carga da bateria
+#define VmaxCarga 2.45 // Tensão máxima comparada na carga da bateria
+#define Nleituras 50 // Número de leituras feito pelo ADC
+#define ADC_Max 4095 // Resolução do ADC
+#define ADC_Ref 3.3 // Tensão máxima do ADC
 
 // Variáveis de controle para o estado da porta
-unsigned long ultimaMudanca = 0;
-volatile int estadoPortaAtual = LOW;
-volatile bool flagEstadoPorta = false;
+unsigned long ultimaMudanca = 0; // Variável que controla o tempo de leitura do Reed Switch
+volatile int estadoPortaAtual = LOW; // Guarda o estado da porta (ABERTA/FECHADA) lido pelo Reed Switch
+volatile bool flagEstadoPorta = false; // Flag utilizada para sinalizar a leitura do Reed Switch
 
 
-// Variáveis/Parâmetros utilizados para o monitor de carga e descarga da bateria
-#define VminCarga 1.80
-#define VmaxCarga 2.45
-const int Nleituras = 50;
-const int ADC_Max = 4095;
-const float ADC_Ref = 3.3;
-const float divisor = 10000.0/(10000.0 + 47000.0);
-unsigned long tempoInicioCarga = 0;
-unsigned long tempoEmCarga = 0;
-unsigned long ultimaCarga = 0;
-enum State {INATIVO, ATIVO, CARREGANDO, CONCLUIDO_CARGA, COMECAR_CARGA};
-State state = CONCLUIDO_CARGA;
+// Variáveis/Parâmetros utilizados para o monitoramento de carga e descarga da bateria
+
+const float divisor = 10000.0/(10000.0 + 47000.0); // Valor do divisor de tensão da bateria
+unsigned long tempoInicioCarga = 0; // Guarda o momento em que começa a carga 
+enum State {INATIVO, ATIVO, CARREGANDO, CONCLUIDO_CARGA, COMECAR_CARGA}; // Estados da bateria
+State state = CONCLUIDO_CARGA; // Estado inicial
 
 
 // Constantes auxiliares de ciclos 
-const unsigned long cicloDeCarga = 10 * 60 * 1000;
-const unsigned long tempoEspera = 20000;
+const unsigned long cicloDeCarga = 10 * 60 * 1000; // Ciclo mínimo de carga
+const unsigned long tempoEspera = 20000; // Tempo de espera para a medição da tensão da bateria
 
 
 // Variáveis auxiliares para a lógica utilizada
-bool modoAula = 0;
-bool modoAulaAtual = 0;
-unsigned long ultimoPeriodo = 0;
-const unsigned long intervalo = 2000;
-int proxModoAula = 0;
+bool modoAula = 0; // Valor de modo aula local
+bool modoAulaAtual = 0; // Variável usada para pegar o valor de uma variável externa
 
 
 // URLs para as requisições HTTP utilizadas para acessar APIs
-String solicitacaoCadastro = "http://10.233.40.182/Fechadura_Eletronica/APIs/solicitacoes.php";
-String atualizaDB = "http://10.233.40.182/Fechadura_Eletronica/APIs/atualizaDB.php";
-String leitorCracha = "http://10.233.40.182/Fechadura_Eletronica/APIs/leiaCartao.php";
-String atualizaModoAula = "http://10.233.40.182/Fechadura_Eletronica/APIs/atualizaModoAula.php";
-String enviaHistorico = "http://10.233.40.182/Fechadura_Eletronica/APIs/atualizaHistorico.php";
-String consultaListaUsuarios = "http://10.233.40.182/Fechadura_Eletronica/APIs/atualizaBackup.php";
-String strAtualizaEstadoPorta = "http://10.233.40.182/Fechadura_Eletronica/APIs/atualizaEstadoPorta.php";
+String solicitacaoCadastro = "http://10.233.40.182/Fechadura_Eletronica/APIs/solicitacoes.php"; // Usada para verificar as solicitações de cadastro
+String atualizaDB = "http://10.233.40.182/Fechadura_Eletronica/APIs/atualizaDB.php"; // Atualiza o banco de dados com as informações de cadastro (TAG + USUÁRIO)
+String leitorCracha = "http://10.233.40.182/Fechadura_Eletronica/APIs/leiaCartao.php"; // Confere se o usuário tentando entrar está registrado no banco
+String atualizaModoAula = "http://10.233.40.182/Fechadura_Eletronica/APIs/atualizaModoAula.php"; // Busca o estado de modo aula atual do banco 
+String enviaHistorico = "http://10.233.40.182/Fechadura_Eletronica/APIs/atualizaHistorico.php"; // Envia os dados para o histórico
+String consultaListaUsuarios = "http://10.233.40.182/Fechadura_Eletronica/APIs/atualizaBackup.php"; // Pega as informações dos usuários direto do banco de dados para fazer o backup
+String atualizaEstadoPorta = "http://10.233.40.182/Fechadura_Eletronica/APIs/atualizaEstadoPorta.php"; // Envia o estado atual da porta (ABERTA/FECHADA) 
 
 
-const char* localBackup = "/usuarios.json"; // Caminho do arquivo na memória
+const char* localBackup = "/usuarios.json"; // Caminho do arquivo de backup na memória
 
 
 // Inicialização de variáveis de bibliotecas
 Adafruit_VL53L0X lox = Adafruit_VL53L0X();
-//HardwareSerial RFIDserial(1);
 MFRC522 rfid(RFID_SDA, RFID_RST);
 
 
@@ -97,13 +99,13 @@ SemaphoreHandle_t mutexModoAula;
 
 
 // Display LCD 16x2
-String mensagem = "Controle de Acesso - Curso de Eletronica ";
-int habilitaFrasePrincipal = 1;
+String mensagem = "Controle de Acesso - Curso de Eletronica "; // Mensagem principal que é exibida no Display
+int habilitaFrasePrincipal = 1; // Flag que habilita a exibição da frase
 LiquidCrystal_I2C lcd(0x27,16,2); //Cria o objeto lcd passando como parâmetros o endereço, o nº de colunas e o nº de linhas
 
 
 // Função chamada pela a interrupção 
-void IRAM_ATTR toggleEstadoPorta(){
+void IRAM_ATTR toggleEstadoPorta(){ // Verifica a mudança de valor no Reed Switch
   unsigned long agora = millis();
   if ((agora - ultimaMudanca) > 100){
     estadoPortaAtual = digitalRead(reedPin); // Recebe o estado da porta
@@ -135,6 +137,7 @@ void setup() {
 
   WiFiManager wm; 
 
+  // Inicializando o display
   lcd.begin(16, 2);
   lcd.init();
   lcd.backlight();
@@ -146,19 +149,22 @@ void setup() {
   rfid.PCD_Init();
 
   // Inicialização de pinos
-  pinMode(RelePin, OUTPUT);
-  digitalWrite(RelePin, 0);
-  pinMode(fechadura, OUTPUT);
-  pinMode(led_internet, OUTPUT);
-  pinMode(led_modoAula, OUTPUT);
-  pinMode(buzzer, OUTPUT);
-  pinMode(led_fechadura, OUTPUT);
-  digitalWrite(led_fechadura, LOW);
-  pinMode(reedPin, INPUT_PULLUP);
+  pinMode(RelePin, OUTPUT); // Pino do Relé como saída
+  digitalWrite(RelePin, 0); // Inicializa em 0
+  pinMode(fechadura, OUTPUT); // Pino da fechadura como saída
+  digitalWrite(fechadura, 0); // Inicializa em 0
+  pinMode(led_internet, OUTPUT); // pino do Led da internet como saída
+  digitalWrite(led_internet, 0); // Inicializa em 0
+  pinMode(led_modoAula, OUTPUT); // pino do Led do modo aula como saída
+  digitalWrite(led_modoAula, 0); // Inicializa em 0
+  pinMode(led_fechadura, OUTPUT); // pino do Led da fechadura como saída
+  digitalWrite(led_fechadura, 0); // Inicializa em 0
+  pinMode(buzzer, OUTPUT); // Pino do buzzer
+  pinMode(reedPin, INPUT_PULLUP); // Pull Up no Reed Switch
 
   // Inicialização dos pinos ADC
-  analogReadResolution(12);
-  analogSetPinAttenuation(adcBat, ADC_11db);
+  analogReadResolution(12); // Configurando a resolução do ADC 
+  analogSetPinAttenuation(adcBat, ADC_11db); // Configurando a atenuação do ADC
 
   while (!Serial) {
     delay(1);
@@ -170,7 +176,7 @@ void setup() {
   if (!res){ // Se não conectar na internet
     Serial.println("Falha ao conectar");
     digitalWrite(led_internet, LOW);
-  } else { // Após conectar a primeira vez, ele salva a senha
+  } else { // Após conectar ele salva a senha
     Serial.println("Conectado com sucesso!");
     Serial.println("IP local: ");
     Serial.println(WiFi.localIP());
@@ -518,13 +524,11 @@ float readVBat(){
 
 void ReleOn(){ // Ativa o relé, chaveando o transistor
   digitalWrite(RelePin, 1);
-  ultimaCarga = millis();
 }
 
 void ReleOff(){ // Desativa o relé, desligando o sinal da base do transistor
   digitalWrite(RelePin, 0);
   tempoInicioCarga = 0;
-  ultimaCarga = millis();
 }
 
 // Lê e transforma o crachá aproximado em Hexadecimal
@@ -646,7 +650,7 @@ void newRegistration(){
 
           if (millis() - tempoInicial > 10000) { // Espera 10s a cada loop para não deixar a Task travada
             //Serial.println("Tempo limite para leitura de cartão excedido.");
-            cont++;
+            
             return; // Sai da função se ninguém aproximar o cartão
           }
         }
@@ -699,7 +703,7 @@ void FuncAtualizaEstadoPorta(){
   
   if (flagEstadoPorta){ // Verifica se a flag foi setada
   
-    httpEstadoPorta.begin(strAtualizaEstadoPorta); // Chama a API que atualiza o estado da porta para que o valor presente no esp e no banco seja igual
+    httpEstadoPorta.begin(atualizaEstadoPorta); // Chama a API que atualiza o estado da porta para que o valor presente no esp e no banco seja igual
     httpEstadoPorta.addHeader("Content-Type", "application/x-www-form-urlencoded"); // Envia as informações pelo corpo da requisição
 
     String corpoRequisicao = "lab=";
@@ -862,9 +866,42 @@ void leiaCracha () {
     rfid.PICC_HaltA();  
 
   } else { // Se a internet não estiver conectada, busca a memória local para verificar permissões de crachás
-    if (leiaCrachaBackup(tag)){ // Se o crachá estiver na memória, permite o acesso, se não, não
+    
+    bool autorizado = leiaCrachaBackup(tag); // Se o crachá estiver na memória, autoriza o acesso, se não, não
+    habilitaFrasePrincipal = 0;
+
+    if (autorizado && modoAula == 0){ 
+
       Serial.println("Acesso liberado.");
-    } else Serial.println("Acesso negado");
+      modoAula = 1;
+      habilitaModoAula(tag);
+
+    } else if (autorizado && modoAula) {
+
+      modoAula = 0;
+
+      lcd.clear();
+      lcd.setCursor(3, 0);
+      lcd.print("Fechadura");
+      lcd.setCursor(3, 1);
+      lcd.print("trancada!");
+      desabilitaModoAula();
+      lcd.clear();
+      lcd.setCursor(4, 0);
+      lcd.print("Modo aula");
+      lcd.setCursor(3, 1);
+      lcd.print("desativado");
+      vTaskDelay(1000 / portTICK_PERIOD_MS);
+      habilitaFrasePrincipal = 1;
+
+    } 
+    else Serial.println("Acesso negado");
+
+    lcd.clear();
+    lcd.setCursor(1, 0);
+    lcd.print("Acesso negado!");
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    habilitaFrasePrincipal = 1;
   }
 }
 
@@ -873,21 +910,24 @@ void habilitaModoAula(String crachaLido) { // Função que habilita o modo aula 
 
   HTTPClient httpHabilita;
 
-  if (crachaLido != "SemCracha") {
-    httpHabilita.begin(enviaHistorico); // Chama a API
-    httpHabilita.addHeader("Content-Type", "application/x-www-form-urlencoded");
+  if (WiFi.status() == WL_CONNECTED){
+      if (crachaLido != "SemCracha") {
+      httpHabilita.begin(enviaHistorico); // Chama a API
+      httpHabilita.addHeader("Content-Type", "application/x-www-form-urlencoded");
 
-    String postData = "cracha=" + crachaLido + "&lab=" + String(lab);
-    int httpResponse = httpHabilita.POST(postData); // Envia os dados necessários para criar uma nova linha na tabela de histórico
-    Serial.println("Registrado novo evento!");
-    lcd.clear();
-    lcd.setCursor(4, 0);
-    lcd.print("Modo aula");
-    lcd.setCursor(5, 1);
-    lcd.print("ativado");
+      String postData = "cracha=" + crachaLido + "&lab=" + String(lab);
+      int httpResponse = httpHabilita.POST(postData); // Envia os dados necessários para criar uma nova linha na tabela de histórico
+      Serial.println("Registrado novo evento!");
+    }
+
+    httpHabilita.end();
   }
 
-  httpHabilita.end();
+  lcd.clear();
+  lcd.setCursor(4, 0);
+  lcd.print("Modo aula");
+  lcd.setCursor(5, 1);
+  lcd.print("ativado");
 
   digitalWrite(led_modoAula, HIGH);
   magnetizaPorta();
