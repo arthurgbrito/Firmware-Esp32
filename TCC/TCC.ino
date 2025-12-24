@@ -98,6 +98,11 @@ SemaphoreHandle_t mutexState;
 SemaphoreHandle_t mutexModoAula;
 
 
+// Variáveis do WiFi
+WiFiManager wm;
+bool wifiConectado = false;
+
+
 // Display LCD 16x2
 String mensagem = "Controle de Acesso - Curso de Eletronica "; // Mensagem principal que é exibida no Display
 int habilitaFrasePrincipal = 1; // Flag que habilita a exibição da frase
@@ -170,18 +175,15 @@ void setup() {
     delay(1);
   }
 
-  // Abre o portal de configuração do ESP
-  bool res = wm.autoConnect("ESP32_Config"); // Cria a rede ESP32_Config para que seja inserida a senha da internet
+  // Configuração do WiFi
+  WiFi.mode(WIFI_STA);
 
-  if (!res){ // Se não conectar na internet
-    Serial.println("Falha ao conectar");
-    digitalWrite(led_internet, LOW);
-  } else { // Após conectar ele salva a senha
-    Serial.println("Conectado com sucesso!");
-    Serial.println("IP local: ");
-    Serial.println(WiFi.localIP());
-    digitalWrite(led_internet, HIGH);
-  }
+  wm.setConfigPortalBlocking(false); // Portal NÃO bloqueante
+  wm.setConfigPortalTimeout(0); // nunca fecha sozinho
+
+  wm.startConfigPortal("ESP32_Config");   // Tenta conectar se já existir Wi-Fi salvo
+  digitalWrite(led_internet, LOW);
+
 
   // Criação das tasks utilizadas no projeto
   xTaskCreatePinnedToCore(TaskHTTP, "TaskHTTP", 4096, NULL, 1, NULL, 0); 
@@ -200,8 +202,25 @@ void setup() {
 }
 
 void loop() {
-  vTaskDelay(1000/portTICK_PERIOD_MS);
+
+  wm.process(); 
+
+  if (WiFi.status() == WL_CONNECTED && !wifiConectado) {
+    wifiConectado = true;
+    Serial.println("WiFi conectado!");
+    Serial.println(WiFi.localIP());
+    digitalWrite(led_internet, HIGH);
+  }
+
+  if (WiFi.status() != WL_CONNECTED && wifiConectado) {
+    wifiConectado = false;
+    Serial.println("WiFi não conectado");
+    digitalWrite(led_internet, LOW);
+  }
+
+  vTaskDelay(100 / portTICK_PERIOD_MS);
 }
+
 
 
         //////////////////////////////////////////////////////
@@ -242,7 +261,7 @@ void TaskFrasePrincipal(void *pv){
 
 void TaskNovoRegistro(void *pv){
   while(1){
-    if (WiFi.status() == WL_CONNECTED){
+    if (wifiConectado){
       newRegistration(); // Monitora se existe algum registro novo no banco de dados
     }
 
@@ -258,7 +277,7 @@ void TaskNovoRegistro(void *pv){
 
 void TaskHTTP(void *pv){
   while(1){
-    if (WiFi.status() == WL_CONNECTED){
+    if (wifiConectado){
       atualizarModoAula(); // Atualiza o modo aula presente no esp, de acordo com o valor de modo aula do banco de dados, deixando os dois lugares sempre com o mesmo valor
       FuncAtualizaEstadoPorta(); // Seta o estado da porta no banco de dados a partir do sensor lido pelo esp 
     }
@@ -809,7 +828,7 @@ void leiaCracha () {
   if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) return; // Espera algum crachá ser aproximado
   String tag = getUIDString(rfid.uid); // Ao ser aproximado, já lê a tag
 
-  if (WiFi.status() == WL_CONNECTED){ // Se a internet estiver conectada, envia uma requisição para a verificação do crachá
+  if (wifiConectado){ // Se a internet estiver conectada, envia uma requisição para a verificação do crachá
 
     httpLeiaCracha.begin(leitorCracha + "?cracha=" + tag + "&lab=" + String(lab)); // Envia uma requisição para a API que irá verificar se o crachá existe no banco e irá inverter o estado de modo aula
     int httpResponse = httpLeiaCracha.GET();
@@ -910,7 +929,7 @@ void habilitaModoAula(String crachaLido) { // Função que habilita o modo aula 
 
   HTTPClient httpHabilita;
 
-  if (WiFi.status() == WL_CONNECTED){
+  if (wifiConectado){
       if (crachaLido != "SemCracha") {
       httpHabilita.begin(enviaHistorico); // Chama a API
       httpHabilita.addHeader("Content-Type", "application/x-www-form-urlencoded");
