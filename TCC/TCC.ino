@@ -1,5 +1,4 @@
 
-
 // includes de bibliotecas utilizadas
 #include <stdlib.h>
 #include <dummy.h>
@@ -186,13 +185,14 @@ void setup() {
 
 
   // Criação das tasks utilizadas no projeto
-  xTaskCreatePinnedToCore(TaskHTTP, "TaskHTTP", 4096, NULL, 1, NULL, 0); 
+  xTaskCreatePinnedToCore(TaskAtualizaDados, "TaskAtualizaDados", 4096, NULL, 1, NULL, 0); 
   xTaskCreatePinnedToCore(TaskNovoRegistro, "TaskNovoRegistro", 4096, NULL, 1, NULL, 0); 
   xTaskCreatePinnedToCore(TaskAtualizaDBLocal, "TaskAtualizaDBLocal", 8192, NULL, 1, NULL, 0);
   xTaskCreatePinnedToCore(TaskControleCarga, "TaskControleCarga", 4096, NULL, 1, NULL, 1);
-  xTaskCreatePinnedToCore(TaskModoAula, "TaskModoAula", 4096, NULL, 1, NULL, 1);
+  xTaskCreatePinnedToCore(TaskLiberaPorta, "TaskLiberaPorta", 4096, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(TaskFrasePrincipal, "TaskFrasePrincipal", 2048, NULL, 1, NULL, 1);
-  attachInterrupt(digitalPinToInterrupt(reedPin), toggleEstadoPorta, CHANGE);
+
+  attachInterrupt(digitalPinToInterrupt(reedPin), toggleEstadoPorta, CHANGE); // Interrupção que monitora a mudança do valor do reed switch
 
   // Inicialização do sensor de distância
   if (!lox.begin()) {
@@ -205,14 +205,14 @@ void loop() {
 
   wm.process(); 
 
-  if (WiFi.status() == WL_CONNECTED && !wifiConectado) {
+  if (WiFi.status() == WL_CONNECTED && !wifiConectado) { // Se o WiFi não estava conectado e agora conectou
     wifiConectado = true;
     Serial.println("WiFi conectado!");
     Serial.println(WiFi.localIP());
     digitalWrite(led_internet, HIGH);
   }
 
-  if (WiFi.status() != WL_CONNECTED && wifiConectado) {
+  if (WiFi.status() != WL_CONNECTED && wifiConectado) { // Se o WiFi estava conectado e agora desconectou
     wifiConectado = false;
     Serial.println("WiFi não conectado");
     digitalWrite(led_internet, LOW);
@@ -220,7 +220,6 @@ void loop() {
 
   vTaskDelay(100 / portTICK_PERIOD_MS);
 }
-
 
 
         //////////////////////////////////////////////////////
@@ -262,7 +261,7 @@ void TaskFrasePrincipal(void *pv){
 void TaskNovoRegistro(void *pv){
   while(1){
     if (wifiConectado){
-      newRegistration(); // Monitora se existe algum registro novo no banco de dados
+      verificaNovoRegistro(); // Monitora se existe algum registro novo no banco de dados
     }
 
     vTaskDelay(100/portTICK_PERIOD_MS);
@@ -275,11 +274,11 @@ void TaskNovoRegistro(void *pv){
         ////////////////////////////////////
 
 
-void TaskHTTP(void *pv){
+void TaskAtualizaDados(void *pv){
   while(1){
     if (wifiConectado){
-      atualizarModoAula(); // Atualiza o modo aula presente no esp, de acordo com o valor de modo aula do banco de dados, deixando os dois lugares sempre com o mesmo valor
-      FuncAtualizaEstadoPorta(); // Seta o estado da porta no banco de dados a partir do sensor lido pelo esp 
+      atualizaModoAula(); // Atualiza o modo aula presente no esp, de acordo com o valor de modo aula do banco de dados, deixando os dois lugares sempre com o mesmo valor
+      funcAtualizaEstadoPorta(); // Seta o estado da porta no banco de dados a partir do sensor lido pelo esp 
     }
 
     leiaCracha(); // Lê o crachá que está sendo aproximado
@@ -398,7 +397,7 @@ void TaskControleCarga(void *pv){
         ////////////////////////////////////////////////////////////////
 
 
-void TaskModoAula(void *pv){ // Responsável por liberar a porta a partir do sensor de proximidade ou manter a porta trancada
+void TaskLiberaPorta(void *pv){ // Responsável por liberar a porta a partir do sensor de proximidade ou manter a porta trancada
   while (1){
   
   if(mutexModoAula && xSemaphoreTake(mutexModoAula, portMAX_DELAY)){
@@ -507,7 +506,8 @@ bool leiaCrachaBackup(String tag){
     return false;
   }
 
-  JsonArray usuarios = doc.as<JsonArray>();
+  JsonArray usuarios = doc.as<JsonArray>(); // Criação do objeto usuários e atribuindo à ele o conteúdo de doc como um objeto 'JsonArray' também
+
   for (JsonObject usuario : usuarios){ // Percorre o vetor de JSON ( array = {{}, {}, {}, ...}), acessando as informações de cada usuário separadamente
     String cracha = usuario["cracha"]; // Pega o crachá do usuário atual
     if (cracha == tag) { // Verifica se corresponde ao crachá que foi lido
@@ -550,8 +550,7 @@ void ReleOff(){ // Desativa o relé, desligando o sinal da base do transistor
   tempoInicioCarga = 0;
 }
 
-// Lê e transforma o crachá aproximado em Hexadecimal
-String getUIDString(MFRC522::Uid &uid) {
+String readTag(MFRC522::Uid &uid) { // Lê e transforma o crachá aproximado em Hexadecimal
   String uidStr = "";
   for (byte i = 0; i < uid.size; i++) {
     if (uid.uidByte[i] < 0x10) uidStr += "0";
@@ -567,8 +566,9 @@ void leDistancia(){ // Lê a distância a partir do sensor VL53L0X
   int medida = measure.RangeMilliMeter/10;
 
   if (medida < 20){ // Se alguém passar a mão na frente, magnetiza e libera a porta 
-    Serial.print("\n\nPorta aberta\n\n");
-    habilitaModoAula("SemCracha");
+    //Serial.print("\n\nPorta aberta\n\n");
+    magnetizaPorta();
+    desmagnetizaPorta();
   }
 
   vTaskDelay(100 / portTICK_PERIOD_MS);
@@ -620,14 +620,12 @@ void bip(int repeticoes) { // Responsável por fazer os bips no buzzer
 }
 
 
-
-
         //////////////////////
         ///  Funções HTTP  ///
         //////////////////////
 
 
-void newRegistration(){
+void verificaNovoRegistro(){
 
   HTTPClient httpNovoRegistro;
   HTTPClient httpPostNovoRegistro;
@@ -653,7 +651,7 @@ void newRegistration(){
         unsigned long tempoInicial = millis();
 
         habilitaFrasePrincipal = 0;
-        while (rfid.PICC_IsNewCardPresent() == 0 || rfid.PICC_ReadCardSerial() == 0) { // Verifica se algum crachá está sendo aproximado 
+        while (rfid.PICC_IsNewCardPresent() == 0 || rfid.PICC_ReadCardSerial() == 0) { // Verifica se algum crachá está sendo aproximado no leitor
           vTaskDelay(50 / portTICK_PERIOD_MS);  
 
           lcd.clear();
@@ -675,7 +673,7 @@ void newRegistration(){
         }
 
         habilitaFrasePrincipal = 1;
-        String tag = getUIDString(rfid.uid); // Lê a tag
+        String tag = readTag(rfid.uid); // Lê a tag que está próxima do leitor
         bip(1);
         //Serial.println(tag);
         //Serial.println("Cartão lido");
@@ -716,7 +714,7 @@ void newRegistration(){
 }
 
 
-void FuncAtualizaEstadoPorta(){
+void funcAtualizaEstadoPorta(){
   
   HTTPClient httpEstadoPorta;
   
@@ -754,7 +752,7 @@ void FuncAtualizaEstadoPorta(){
 }
 
 
-void atualizarModoAula() {
+void atualizaModoAula() {
   
   HTTPClient httpModoAula;
 
@@ -814,7 +812,7 @@ void atualizarModoAula() {
           } 
         }
       }  
-    } else Serial.println("Teste ok AtualizaModoAula"); 
+    }
     
     httpModoAula.end();
   } 
@@ -826,7 +824,7 @@ void leiaCracha () {
   HTTPClient httpLeiaCracha;
 
   if (!rfid.PICC_IsNewCardPresent() || !rfid.PICC_ReadCardSerial()) return; // Espera algum crachá ser aproximado
-  String tag = getUIDString(rfid.uid); // Ao ser aproximado, já lê a tag
+  String tag = readTag(rfid.uid); // Ao ser aproximado, já lê a tag
 
   if (wifiConectado){ // Se a internet estiver conectada, envia uma requisição para a verificação do crachá
 
