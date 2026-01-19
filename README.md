@@ -86,4 +86,10 @@ Temos algumas funções auxiliares que ajudam a compôr as funcionalidades do si
 - `TaskAtualizaDados()`: Responsável por manter em loop as funcionalidades. Então é chamada a função que atualiza o Modo Aula e o estado da porta, em seguida chama a função que lê o crachá, e assim é mantido o loop.
 
 
-⚠️ OBS: Algumas Tasks possuem apenas uma função sendo chamada dentro dela. Isso pode parecer estranho mas existe um motivo: As funções estão separadas por Tasks para poderem ser executadas em paralelo, assim tendo uma boa eficiência em nosso sistema, pois se juntássemos as funções em uma ou duas Tasks o sistema seria lento e não executaria direito todas as tarefas.
+⚠️ OBS: Algumas Tasks possuem apenas uma função sendo chamada dentro dela. Isso pode parecer estranho mas existe um motivo: As funções estão separadas por Tasks para poderem ser executadas em paralelo, assim tendo uma boa eficiência em nosso sistema, pois se juntássemos as funções em uma ou duas Tasks o sistema seria lento e não executaria direito todas as tarefas. Para mudar o laboratório individual de cada ESP, basta apenas mudar o valor da variável definida LAB com o ID seguindo a lógica da tabela:
+
+|ID no código|1|2|3|4|5|6|7|8|9|10
+|-|-|-|-|-|-|-|-|-|-|-
+|Lab|1|2|3|6|9|10|11|12|13|14
+
+
